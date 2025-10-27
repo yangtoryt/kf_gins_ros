@@ -1,0 +1,24 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: Odometry
+      Topic: /kf_gins/odom
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Path
+      Topic: /kf_gins/path
+  Global Options:
+    Fixed Frame: map
+Views:
+  Current:
+    Class: rviz_default_plugins/Orbit

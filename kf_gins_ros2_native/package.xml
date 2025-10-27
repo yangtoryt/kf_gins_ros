@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>kf_gins_ros2_native</name>
+  <version>0.1.2</version>
+  <description>Native ROS2 (Foxy) wrapper around KF-GINS core. Subscribes IMU/GNSS, runs core in-process, publishes TF/Odometry/Path.</description>
+  <maintainer email="you@example.com">KF-GINS ROS2 Native</maintainer>
+  <license>GPL-3.0-or-later</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_auto</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>message_filters</depend>
+  <depend>Eigen3</depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

@@ -1,0 +1,126 @@
+*** a/src/kf_node.cpp
+--- b/src/kf_node.cpp
+***************
+*** 88,126 ****
+  void gnssCb(const sensor_msgs::msg::NavSatFix::SharedPtr msg){
+      const double t=rclcpp::Time(msg->header.stamp).seconds();
+-     Eigen::Vector3d std_ned(-1,-1,-1);
+-     if(msg->position_covariance_type==sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_DIAGONAL_KNOWN){
+-       const double std_e = std::sqrt(std::max(0.0, msg->position_covariance[0]));
+-       const double std_n = std::sqrt(std::max(0.0, msg->position_covariance[4]));
+-       const double std_u = std::sqrt(std::max(0.0, msg->position_covariance[8]));
+-       std_ned = {std_n,std_e,std_u};
+-     }
+-     core_->ingestGnss(t,msg->latitude,msg->longitude,msg->altitude,std_ned); publishState();
+  }
+  
+  void publishState(){
+-     const auto st = core_->current();
+-     double x,y,z; geo::llh_to_ecef(st.lat_deg*M_PI/180.0, st.lon_deg*M_PI/180.0, st.h_m, x,y,z);
+-     if(!have_origin_){ origin_ecef_={x,y,z}; origin_lat_=st.lat_deg*M_PI/180.0; origin_lon_=st.lon_deg*M_PI/180.0; have_origin_=true; }
+-     Eigen::Vector3d enu = geo::ecef_to_enu({x,y,z}, origin_ecef_, origin_lat_, origin_lon_);
+-     auto q = geo::rpy_to_quat(st.roll_deg*M_PI/180.0, st.pitch_deg*M_PI/180.0, st.yaw_deg*M_PI/180.0);
+-     auto stamp = now();
+-     geometry_msgs::msg::TransformStamped tf; tf.header.stamp=stamp; tf.header.frame_id=map_frame_; tf.child_frame_id=base_frame_;
+-     tf.transform.translation.x=enu.x(); tf.transform.translation.y=enu.y(); tf.transform.translation.z=enu.z();
+-     tf.transform.rotation.x=q.x(); tf.transform.rotation.y=q.y(); tf.transform.rotation.z=q.z(); tf.transform.rotation.w=q.w();
+-     tf_broadcaster_->sendTransform(tf);
+-     nav_msgs::msg::Odometry od; od.header.stamp=stamp; od.header.frame_id=map_frame_; od.child_frame_id=base_frame_;
+-     od.pose.pose.position.x=enu.x(); od.pose.pose.position.y=enu.y(); od.pose.pose.position.z=enu.z();
+-     od.pose.pose.orientation.x=q.x(); od.pose.pose.orientation.y=q.y(); od.pose.pose.orientation.z=q.z(); od.pose.pose.orientation.w=q.w();
+-     od.twist.twist.linear.x=st.vE; od.twist.twist.linear.y=st.vN; od.twist.twist.linear.z=-st.vD; odom_pub_->publish(od);
+-     if(++dec_>=pose_decimation_){ dec_=0; geometry_msgs::msg::PoseStamped ps; ps.header=od.header; ps.pose=od.pose.pose;
+-       path_msg_.header.stamp=stamp; path_msg_.poses.push_back(ps);
+-       if((int)path_msg_.poses.size()>max_path_pts_) path_msg_.poses.erase(path_msg_.poses.begin(), path_msg_.poses.begin()+(path_msg_.poses.size()-max_path_pts_));
+-     }
+  }
+--- 88,147 ----
+  void gnssCb(const sensor_msgs::msg::NavSatFix::SharedPtr msg){
+      const double t=rclcpp::Time(msg->header.stamp).seconds();
++ 
++     // 1) 首次 GNSS 到来时，用它来设 ENU 原点
++     if(!have_origin_){
++       double ox, oy, oz;
++       geo::llh_to_ecef(msg->latitude * M_PI/180.0,
++                        msg->longitude * M_PI/180.0,
++                        msg->altitude, ox, oy, oz);
++       origin_ecef_ = Eigen::Vector3d(ox, oy, oz);
++       origin_lat_  = msg->latitude  * M_PI/180.0;
++       origin_lon_  = msg->longitude * M_PI/180.0;
++       have_origin_ = true;
++       RCLCPP_INFO(this->get_logger(),
++         "ENU origin set by GNSS: lat=%.8f lon=%.8f h=%.3f",
++         msg->latitude, msg->longitude, msg->altitude);
++     }
++ 
++     // 2) 常规 GNSS 注入
++     Eigen::Vector3d std_ned(-1,-1,-1);
++     if(msg->position_covariance_type==sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_DIAGONAL_KNOWN){
++       const double std_e = std::sqrt(std::max(0.0, msg->position_covariance[0]));
++       const double std_n = std::sqrt(std::max(0.0, msg->position_covariance[4]));
++       const double std_u = std::sqrt(std::max(0.0, msg->position_covariance[8]));
++       std_ned = {std_n,std_e,std_u};
++     }
++     core_->ingestGnss(t,msg->latitude,msg->longitude,msg->altitude,std_ned);
++     publishState();
+  }
+  
+  void publishState(){
++     // ENU 原点未就绪（尚未收到首个 GNSS）则不发布
++     if(!have_origin_) return;
++ 
++     const auto st = core_->current();
++ 
++     // 地理坐标 -> ECEF -> ENU
++     double x,y,z;
++     geo::llh_to_ecef(st.lat_deg*M_PI/180.0, st.lon_deg*M_PI/180.0, st.h_m, x,y,z);
++     Eigen::Vector3d enu = geo::ecef_to_enu({x,y,z}, origin_ecef_, origin_lat_, origin_lon_);
++     auto q = geo::rpy_to_quat(st.roll_deg*M_PI/180.0, st.pitch_deg*M_PI/180.0, st.yaw_deg*M_PI/180.0);
++ 
++     auto stamp = now();
++ 
++     // map -> base_link
++     geometry_msgs::msg::TransformStamped tf;
++     tf.header.stamp = stamp;
++     tf.header.frame_id = map_frame_;
++     tf.child_frame_id  = base_frame_;
++     tf.transform.translation.x = enu.x();
++     tf.transform.translation.y = enu.y();
++     tf.transform.translation.z = enu.z();
++     tf.transform.rotation.x = q.x();
++     tf.transform.rotation.y = q.y();
++     tf.transform.rotation.z = q.z();
++     tf.transform.rotation.w = q.w();
++     tf_broadcaster_->sendTransform(tf);
++ 
++     // Odometry
++     nav_msgs::msg::Odometry od;
++     od.header.stamp = stamp;
++     od.header.frame_id = map_frame_;
++     od.child_frame_id  = base_frame_;
++     od.pose.pose.position.x = enu.x();
++     od.pose.pose.position.y = enu.y();
++     od.pose.pose.position.z = enu.z();
++     od.pose.pose.orientation.x = q.x();
++     od.pose.pose.orientation.y = q.y();
++     od.pose.pose.orientation.z = q.z();
++     od.pose.pose.orientation.w = q.w();
++     od.twist.twist.linear.x = st.vE;
++     od.twist.twist.linear.y = st.vN;
++     od.twist.twist.linear.z = -st.vD;
++     odom_pub_->publish(od);
++ 
++     // Path 采样（降频）
++     if(++dec_ >= pose_decimation_){
++       dec_ = 0;
++       geometry_msgs::msg::PoseStamped ps;
++       ps.header = od.header;
++       ps.pose   = od.pose.pose;
++       path_msg_.header.stamp = stamp;
++       path_msg_.poses.push_back(ps);
++       if((int)path_msg_.poses.size() > max_path_pts_){
++         path_msg_.poses.erase(path_msg_.poses.begin(),
++                               path_msg_.poses.begin() + (path_msg_.poses.size() - max_path_pts_));
++       }
++     }
+  }

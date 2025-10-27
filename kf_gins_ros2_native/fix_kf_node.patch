@@ -1,0 +1,35 @@
+--- a/src/kf_node.cpp
++++ b/src/kf_node.cpp
+@@
+-#include <Eigen/Dense>
++#include <Eigen/Dense>
++#include <algorithm>
++#include <cmath>
+@@
+-    geometry_msgs::msg::TransformStamped t; t.header.stamp=now(); t.header.frame_id=map_frame_; t.child_frame_id=odom_frame_; t.transform.rotation.w=1.0; tf_broadcaster_->sendTransform(t);
++    geometry_msgs::msg::TransformStamped t; t.header.stamp=now(); t.header.frame_id=map_frame_; t.child_frame_id=odom_frame_; t.transform.rotation.w=1.0; tf_broadcaster_->sendTransform(t);
++    if (path_rate_hz_ > 0.0) {
++      path_timer_ = this->create_wall_timer(
++        std::chrono::milliseconds((int)(1000.0 / std::max(1.0, path_rate_hz_))),
++        std::bind(&KFGinsNativeNode::publishPath, this));
++    }
+@@
+-    if(imu_is_delta_){ dtheta={msg->angular_velocity.x,msg->angular_velocity.y,msg->angular_velocity.z};
+-                       dvel  ={msg->linear_acceleration.x,msg->linear_acceleration.y,msg->linear_acceleration.z}; }
+-    else { dtheta={msg->angular_velocity.x,msg->angular_velocity.y,msg->angular_velocity.z}*dt;
+-           dvel  ={msg->linear_acceleration.x,msg->linear_acceleration.y,msg->linear_acceleration.z}*dt; }
++    if (imu_is_delta_) {
++      dtheta = Eigen::Vector3d(msg->angular_velocity.x,
++                               msg->angular_velocity.y,
++                               msg->angular_velocity.z);
++      dvel   = Eigen::Vector3d(msg->linear_acceleration.x,
++                               msg->linear_acceleration.y,
++                               msg->linear_acceleration.z);
++    } else {
++      dtheta = Eigen::Vector3d(msg->angular_velocity.x,
++                               msg->angular_velocity.y,
++                               msg->angular_velocity.z) * dt;
++      dvel   = Eigen::Vector3d(msg->linear_acceleration.x,
++                               msg->linear_acceleration.y,
++                               msg->linear_acceleration.z) * dt;
++    }

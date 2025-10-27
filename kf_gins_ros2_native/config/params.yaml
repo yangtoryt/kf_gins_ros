@@ -1,0 +1,6 @@
+config_file: "/home/yang/KF-GINS/config/config.yaml"
+imu_topic: "/imu/data"
+gnss_topic: "/gps/fix_cov"
+imu_is_delta: false
+pose_decimation: 10
+max_path_points: 20000
