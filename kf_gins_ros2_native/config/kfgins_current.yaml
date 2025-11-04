@@ -1,0 +1,46 @@
+/kf_gins_native:
+  ros__parameters:
+    align_gate_m: 300.0
+    base_frame: base_link
+    config_file: ''
+    gnss_topic: /gps/fix
+    imu_is_delta: false
+    imu_topic: /imu/data
+    map_frame: map
+    max_jump_m: 200.0
+    max_path_points: 20000
+    min_dist_m: 0.2
+    odom_frame: odom
+    path_publish_rate_hz: 5.0
+    pose_decimation: 10
+    publish_after_sec: 2.0
+    qos_overrides:
+      /clock:
+        subscription:
+          depth: 1
+          durability: volatile
+          history: keep_last
+          reliability: best_effort
+      /parameter_events:
+        publisher:
+          depth: 1000
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+      /tf:
+        publisher:
+          depth: 100
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+      /tf_static:
+        publisher:
+          depth: 1
+          history: keep_last
+          reliability: reliable
+    reset_gate_m: 20.0
+    start_after_gnss_sec: 1.0
+    use_gnss_llh_for_pose: true
+    use_sim_time: true
+    v_limit_mps: 120.0
+

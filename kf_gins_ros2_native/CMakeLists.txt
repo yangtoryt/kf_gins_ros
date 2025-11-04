@@ -45,12 +45,22 @@ target_include_directories(kf_gins_core_adapter PUBLIC
 ament_auto_add_executable(kf_gins_node src/main.cpp)
 target_link_libraries(kf_gins_node kf_gins_node_lib)
 
+# 安装 Python 节点到 libexec（ros2 launch 会从这里找）
+install(PROGRAMS
+  scripts/imu_flu_to_frd.py
+  scripts/odom_to_path.py
+  # 若需要用 launch 起 hover_move，也一起装：
+  # scripts/hover_move.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 # 安装
 install(TARGETS kf_gins_node kf_gins_node_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
+install(DIRECTORY launch/ DESTINATION launch)
 install(DIRECTORY launch rviz config DESTINATION share/${PROJECT_NAME})
 
 ament_package()
