@@ -1,39 +1,33 @@
-/kf_gins_native:
+kf_gins_node:
   ros__parameters:
     use_sim_time: true
 
-    # frames & topics
     map_frame: map
-    odom_frame: map
+    odom_frame: odom
     base_frame: base_link
 
-    imu_topic: /imu/data
-    gnss_topic: /gps/fix
-    imu_is_delta: false
+    imu_topic: /imu/data         # 由 imu_flu_to_frd.py 转换输出
+    gnss_topic: /gps/fix         # 由 gnss_relay.py 转发输出（reliable）
 
-    # 先让 GNSS 直接出姿态，确认轨迹“干净”
+    imu_is_delta: false
     use_gnss_llh_for_pose: true
 
-    # Path 稀疏化 + 发布频率
     pose_decimation: 10
     path_publish_rate_hz: 3.0
     min_dist_m: 0.20
     max_path_points: 20000
 
-    # 保护阈值（放宽重置/对齐门控）
     align_gate_m: 300.0
     reset_gate_m: 50.0
     v_limit_mps: 120.0
 
-    # 延迟到拿到 GNSS 再发
     start_after_gnss_sec: 1.0
     publish_after_sec: 2.0
 
-    # QoS
     qos_overrides:
       /tf:
         publisher: {history: keep_last, depth: 100, reliability: reliable, durability: volatile}
       /tf_static:
-        publisher: {history: keep_last, depth: 1,   reliability: reliable}
+        publisher: {history: keep_last, depth: 1, reliability: reliable}
       /clock:
         subscription: {history: keep_last, depth: 1, reliability: best_effort, durability: volatile}

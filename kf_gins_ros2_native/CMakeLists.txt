@@ -49,6 +49,7 @@ target_link_libraries(kf_gins_node kf_gins_node_lib)
 install(PROGRAMS
   scripts/imu_flu_to_frd.py
   scripts/odom_to_path.py
+  scripts/gnss_relay.py
   # 若需要用 launch 起 hover_move，也一起装：
   # scripts/hover_move.py
   DESTINATION lib/${PROJECT_NAME}

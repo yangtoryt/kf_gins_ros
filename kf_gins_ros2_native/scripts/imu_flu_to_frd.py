@@ -1,50 +1,80 @@
 #!/usr/bin/env python3
+import math
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from sensor_msgs.msg import Imu
+from geometry_msgs.msg import Quaternion
+from rcl_interfaces.msg import SetParametersResult
+from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+
+def quat_multiply(a, b):
+    return Quaternion(
+        x=a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+        y=a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+        z=a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+        w=a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+    )
+
+def quat_from_axis_angle(ax, ay, az, angle):
+    s = math.sin(angle/2.0)
+    c = math.cos(angle/2.0)
+    return Quaternion(x=ax*s, y=ay*s, z=az*s, w=c)
+
+Q_FLU_TO_FRD = quat_from_axis_angle(1.0, 0.0, 0.0, math.pi)  # 绕 X 轴 180°
 
 class ImuFluToFrd(Node):
     def __init__(self):
         super().__init__('imu_flu_to_frd')
-        in_topic  = self.declare_parameter('in_topic',  '/imu/data_flu').get_parameter_value().string_value
-        out_topic = self.declare_parameter('out_topic', '/imu/data').get_parameter_value().string_value
-        self.flip_g = self.declare_parameter('flip_gravity_sign_to_frd', True).get_parameter_value().bool_value
 
-        qos = QoSProfile(depth=50)
-        qos.reliability = QoSReliabilityPolicy.BEST_EFFORT
-        qos.history = QoSHistoryPolicy.KEEP_LAST
+        self.declare_parameter('input_topic', '/mavros/imu/data')
+        self.declare_parameter('output_topic', '/imu/data')
+        self.declare_parameter('flip_gravity', True)
 
-        self.sub = self.create_subscription(Imu, in_topic, self.cb, qos)
-        self.pub = self.create_publisher(Imu, out_topic, qos)
-        self.get_logger().info(f'IMU conv: {in_topic} (FLU) -> {out_topic} (FRD), flipG={self.flip_g}')
+        self.input_topic = self.get_parameter('input_topic').get_parameter_value().string_value
+        self.output_topic = self.get_parameter('output_topic').get_parameter_value().string_value
+        self.flip_gravity = self.get_parameter('flip_gravity').get_parameter_value().bool_value
 
-    def cb(self, m: Imu):
+        # 订阅：传感器QoS（best_effort）
+        self.sub = self.create_subscription(Imu, self.input_topic, self.cb, qos_profile_sensor_data)
+
+        # 发布：reliable，给后端滤波（默认 reliable，但这里显式写清 QoS）
+        pub_qos = QoSProfile(depth=10)
+        pub_qos.reliability = ReliabilityPolicy.RELIABLE
+        pub_qos.history = HistoryPolicy.KEEP_LAST
+        pub_qos.durability = DurabilityPolicy.VOLATILE
+        self.pub = self.create_publisher(Imu, self.output_topic, pub_qos)
+
+        self.add_on_set_parameters_callback(self._on_set_params)
+
+        self.get_logger().info(f'IMU conv: {self.input_topic} (FLU) -> {self.output_topic} (FRD), flipG={self.flip_gravity}')
+
+    def _on_set_params(self, params):
+        ok = True
+        for p in params:
+            if p.name == 'flip_gravity':
+                self.flip_gravity = p.value
+        return SetParametersResult(successful=ok)
+
+    def cb(self, msg: Imu):
         out = Imu()
-        out.header = m.header
-        out.header.frame_id = 'base_link'
+        out.header = msg.header
 
-        # 姿态直接透传（避免额外不确定旋转）
-        out.orientation = m.orientation
-        out.orientation_covariance = m.orientation_covariance
+        out.orientation = quat_multiply(msg.orientation, Q_FLU_TO_FRD)
+        out.orientation_covariance = msg.orientation_covariance
 
-        # R_x(pi): (x, y, z) -> (x, -y, -z)
-        out.angular_velocity.x =  m.angular_velocity.x
-        out.angular_velocity.y = -m.angular_velocity.y
-        out.angular_velocity.z = -m.angular_velocity.z
-        out.angular_velocity_covariance = m.angular_velocity_covariance
+        out.angular_velocity.x = msg.angular_velocity.x
+        out.angular_velocity.y = -msg.angular_velocity.y
+        out.angular_velocity.z = -msg.angular_velocity.z
+        out.angular_velocity_covariance = msg.angular_velocity_covariance
 
-        ax =  m.linear_acceleration.x
-        ay = -m.linear_acceleration.y
-        az = -m.linear_acceleration.z
-
-        if self.flip_g and abs(ax) < 0.5 and abs(ay) < 0.5 and abs(az) > 5.0:
-            az = abs(az)
-
-        out.linear_acceleration.x = ax
-        out.linear_acceleration.y = ay
-        out.linear_acceleration.z = az
-        out.linear_acceleration_covariance = m.linear_acceleration_covariance
+        out.linear_acceleration.x = msg.linear_acceleration.x
+        if self.flip_gravity:
+            out.linear_acceleration.y = -msg.linear_acceleration.y
+            out.linear_acceleration.z = -msg.linear_acceleration.z
+        else:
+            out.linear_acceleration.y = msg.linear_acceleration.y
+            out.linear_acceleration.z = msg.linear_acceleration.z
+        out.linear_acceleration_covariance = msg.linear_acceleration_covariance
 
         self.pub.publish(out)
 

@@ -1,6 +1,15 @@
 Panels:
   - Class: rviz_common/Displays
     Name: Displays
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+  - Class: rviz_common/Views
+    Name: Views
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Time
+    Name: Time
+
 Visualization Manager:
   Displays:
     - Class: rviz_default_plugins/Grid
@@ -17,8 +26,20 @@ Visualization Manager:
       Enabled: true
       Name: Path
       Topic: /kf_gins/path
+
   Global Options:
     Fixed Frame: map
+
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/Measure
+
 Views:
   Current:
     Class: rviz_default_plugins/Orbit
+    Distance: 30
+    Pitch: 0.785
+    Yaw: 0.785
+  Saved: []
