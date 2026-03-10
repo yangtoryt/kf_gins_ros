@@ -1,0 +1,8 @@
+build/
+bin/
+dataset/
+.vscode/
+**/*.bag
+**/*.log
+kf_gins_ros2_native/external/KF-GINS/dataset/*.txt
+kf_gins_ros2_native/external/KF-GINS/dataset/*.nav

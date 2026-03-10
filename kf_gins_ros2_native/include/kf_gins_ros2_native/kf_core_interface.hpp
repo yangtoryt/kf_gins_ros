@@ -18,6 +18,8 @@ public:
                          double dt_sec, bool imu_is_delta) = 0;
   virtual bool ingestGnss(double t_sec, double lat_deg, double lon_deg, double h_m,
                           const Eigen::Vector3d& std_ned) = 0;
+  virtual bool ingestGnssVel(double t_sec, double vN, double vE, double vD,
+                             const Eigen::Vector3d& std_vel) = 0;
   virtual State current() const = 0;
 };
 std::unique_ptr<KFCore> create_kf_core();

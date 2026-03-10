@@ -1,0 +1,64 @@
+kf_gins_node:
+  ros__parameters:
+    # ===== 【修复】新增的仿真/实机模式参数 =====
+    use_sim_gnss_std: true          # 启用仿真模式 GNSS std
+    sim_gnss_std_h_m: 0.1           # 仿真环境下的水平 GNSS 标准差（米）
+    sim_gnss_std_u_m: 0.2           # 仿真环境下的竖直 GNSS 标准差（米）
+    use_zero_velocity_update_when_disarmed: true  # 无人机未启动时应用零速度约束
+    zupt_reset_interval_sec: 1.0    # 地面 ZUPT 复位间隔（秒）
+    zupt_std_mps: 0.05              # 预留：未来可接入真 ZUPT 观测
+    disarmed_yaw_lock_enable: true
+    disarmed_yaw_lock_interval_sec: 1.0
+    disarmed_yaw_lock_max_yaw_err_deg: 5.0
+    
+    # ===== 原有参数（保持兼容） =====
+    use_sim_time: true
+    imu_topic: /imu/data
+    gnss_topic: /gps/fix
+    imu_is_delta: false
+
+    map_frame: map
+    odom_frame: map
+    base_frame: base_link
+
+    # 轨迹与发布节流
+    path_publish_rate_hz: 5.0
+    pose_decimation: 5
+    max_path_points: 20000
+    min_dist_m: 1.0
+
+    # 对齐/跳变门限
+    use_gnss_llh_for_pose: true
+    use_gnss_llh_for_pose_when_disarmed: true
+    start_after_gnss_sec: 1.0
+    publish_after_sec: 1.0
+    align_gate_m: 5.0
+    max_jump_m: 30.0
+    reset_gate_m: 8.0
+    v_limit_mps: 20.0
+
+    # GNSS 默认标准差（用于实机模式）
+    gnss_default_std_h_m: 5.0
+    gnss_default_std_u_m: 10.0
+    gnss_min_std_m: 0.5
+
+    # 时间处理
+    use_node_time_for_core: false
+    use_integrated_time_for_core: true
+    use_steady_time_for_imu_dt: true
+    force_monotonic_time_for_core: true
+    min_imu_dt_sec: 0.001
+    max_imu_dt_sec: 0.50
+    imu_dt_estimate_sec: 0.01
+    auto_reset_on_time_jump: true
+    time_jump_reset_threshold_sec: 0.5
+    gnss_time_offset_sec: 0.001
+
+    # MAVROS 状态监控
+    mavros_state_topic: /mavros/state
+    path_require_armed: false
+    clear_path_on_arm_transition: false
+
+    # 故障恢复
+    auto_reset_on_invalid_state: true
+    invalid_state_reset_cooldown_sec: 5.0

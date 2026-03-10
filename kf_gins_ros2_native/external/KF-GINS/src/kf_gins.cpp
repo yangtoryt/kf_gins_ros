@@ -66,6 +66,27 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
+    // 读取滤波模式参数
+    // load filter mode parameter
+    int filter_mode = 0; // 0: standard EKF, 1: IEKF
+    try {
+        filter_mode = config["filter_mode"].as<int>();
+    } catch (YAML::Exception &exception) {
+        filter_mode = 0; // default to standard EKF
+    }
+
+    // 根据模式设置IEKF参数
+    // set IEKF parameters based on mode
+    if (filter_mode == 0) {
+        // Standard EKF mode: max_iterations = 1
+        options.iekf_max_iterations = 1;
+        std::cout << "Filter Mode: Standard EKF (IEKF max_iterations = 1)" << std::endl;
+    } else {
+        // IEKF mode: use configured max_iterations
+        std::cout << "Filter Mode: IEKF (max_iterations = " << options.iekf_max_iterations << ")" << std::endl;
+    }
+    std::cout << std::endl;
+
     // 读取文件路径配置
     // load filepath configuration
     std::string imupath, gnsspath, outputpath;
@@ -102,15 +123,26 @@ int main(int argc, char *argv[]) {
     // Construct GIEngine
     GIEngine giengine(options);
 
-    // 构造输出文件
-    // construct output file
+    // 构造输出文件，根据滤波模式设置不同的输出文件名
+    // construct output files, set different output filenames based on filter mode
     // navfile: gnssweek(1) + time(1) + pos(3) + vel(3) + euler angle(3) = 11
     // imuerrfile: time(1) + gyrbias(3) + accbias(3) + gyrscale(3) + accscale(3) = 13
     // stdfile: time(1) + pva_std(9) + imubias_std(6) + imuscale_std(6) = 22
     int nav_columns = 11, imuerr_columns = 13, std_columns = 22;
-    FileSaver navfile(outputpath + "/KF_GINS_Navresult.nav", nav_columns, FileSaver::TEXT);
-    FileSaver imuerrfile(outputpath + "/KF_GINS_IMU_ERR.txt", imuerr_columns, FileSaver::TEXT);
-    FileSaver stdfile(outputpath + "/KF_GINS_STD.txt", std_columns, FileSaver::TEXT);
+    
+    std::string mode_suffix = (filter_mode == 0) ? "EKF" : "IEKF";
+    std::string nav_filename = outputpath + "/" + mode_suffix + "_Navresult.nav";
+    std::string imuerr_filename = outputpath + "/" + mode_suffix + "_IMU_ERR.txt";
+    std::string std_filename = outputpath + "/" + mode_suffix + "_STD.txt";
+    
+    FileSaver navfile(nav_filename, nav_columns, FileSaver::TEXT);
+    FileSaver imuerrfile(imuerr_filename, imuerr_columns, FileSaver::TEXT);
+    FileSaver stdfile(std_filename, std_columns, FileSaver::TEXT);
+    
+    std::cout << "Output files:" << std::endl;
+    std::cout << "  - " << nav_filename << std::endl;
+    std::cout << "  - " << imuerr_filename << std::endl;
+    std::cout << "  - " << std_filename << std::endl << std::endl;
 
     // 检查文件是否正确打开
     // check if these files are all opened
@@ -213,6 +245,7 @@ int main(int argc, char *argv[]) {
     auto te = absl::Now();
     std::cout << std::endl << std::endl << "KF-GINS Process Finish! ";
     std::cout << "From " << starttime << " s to " << endtime << " s, total " << interval << " s!" << std::endl;
+    std::cout << "Filter Mode: " << ((filter_mode == 0) ? "EKF" : "IEKF") << std::endl;
     std::cout << "Cost " << absl::ToDoubleSeconds(te - ts) << " s in total" << std::endl;
 
     return 0;
@@ -356,6 +389,40 @@ bool loadConfig(YAML::Node &config, GINSOptions &options) {
         return false;
     }
     options.antlever = Eigen::Vector3d(vec1.data());
+
+    // Sage-Husa 自适应观测噪声配置（可选）
+    // Sage-Husa adaptive measurement noise options (optional)
+    try {
+        if (config["sage_husa"]) {
+            try {
+                options.sage_husa.enable = config["sage_husa"]["enable"].as<bool>();
+            } catch (YAML::Exception &) {
+                // keep default
+            }
+            try {
+                options.sage_husa.alpha = config["sage_husa"]["alpha"].as<double>();
+            } catch (YAML::Exception &) {
+                // keep default
+            }
+            try {
+                options.sage_husa.diag_only = config["sage_husa"]["diag_only"].as<bool>();
+            } catch (YAML::Exception &) {
+                // keep default
+            }
+            try {
+                options.sage_husa.min_var_factor = config["sage_husa"]["min_var_factor"].as<double>();
+            } catch (YAML::Exception &) {
+                // keep default
+            }
+            try {
+                options.sage_husa.min_var_abs = config["sage_husa"]["min_var_abs"].as<double>();
+            } catch (YAML::Exception &) {
+                // keep default
+            }
+        }
+    } catch (YAML::Exception &) {
+        // keep defaults if section is malformed
+    }
 
     return true;
 }

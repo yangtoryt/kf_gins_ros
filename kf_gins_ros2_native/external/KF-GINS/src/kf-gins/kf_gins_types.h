@@ -81,6 +81,21 @@ typedef struct GINSOptions {
     // install parameters
     Eigen::Vector3d antlever = {0, 0, 0};
 
+    // IEKF (Iterated Extended Kalman Filter) 参数
+    // IEKF parameters
+    int iekf_max_iterations = 5;              // 最大迭代次数 / max iterations
+    double iekf_convergence_threshold = 1e-6; // 收敛阈值 / convergence threshold
+
+    // Sage-Husa 自适应观测噪声参数 (用于在线更新 R)
+    // Sage-Husa adaptive measurement noise options (online update of R)
+    struct SageHusaOptions {
+        bool enable = true;              // 是否启用 / enable adaptive R
+        double alpha = 0.95;             // 遗忘因子 / forgetting factor in (0,1)
+        bool diag_only = true;           // 仅更新对角线 / keep R diagonal
+        double min_var_factor = 0.1;     // 对角线下限：min_var_factor * R0
+        double min_var_abs = 0.0;        // 绝对方差下限 [unit^2]，0 表示不额外启用
+    } sage_husa;
+
     void print_options() {
         std::cout << "---------------KF-GINS Options:---------------" << std::endl;
 
@@ -132,7 +147,22 @@ typedef struct GINSOptions {
 
         // 打印GNSS天线杆臂
         // print GNSS antenna leverarm
-        std::cout << " - Antenna leverarm: " << antlever.transpose() << " [m] " << std::endl << std::endl;
+        std::cout << " - Antenna leverarm: " << antlever.transpose() << " [m] " << std::endl;
+
+        // 打印IEKF参数
+        // print IEKF parameters
+        std::cout << " - IEKF Options: " << std::endl;
+        std::cout << '\t' << "- max iterations: " << iekf_max_iterations << std::endl;
+        std::cout << '\t' << "- convergence threshold: " << std::scientific << iekf_convergence_threshold << std::defaultfloat << std::endl << std::endl;
+
+        // 打印 Sage-Husa 自适应参数
+        // print Sage-Husa options
+        std::cout << " - Sage-Husa Options (adaptive R): " << std::endl;
+        std::cout << '\t' << "- enable: " << (sage_husa.enable ? "true" : "false") << std::endl;
+        std::cout << '\t' << "- alpha: " << sage_husa.alpha << std::endl;
+        std::cout << '\t' << "- diag_only: " << (sage_husa.diag_only ? "true" : "false") << std::endl;
+        std::cout << '\t' << "- min_var_factor: " << sage_husa.min_var_factor << std::endl;
+        std::cout << '\t' << "- min_var_abs: " << sage_husa.min_var_abs << std::endl << std::endl;
     }
 
 } GINSOptions;

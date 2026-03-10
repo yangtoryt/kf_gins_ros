@@ -1,6 +1,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
+#include <sensor_msgs/msg/nav_sat_status.hpp>
+#include <mavros_msgs/msg/state.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -8,13 +10,16 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
 #include <chrono>
+#include <limits>
 
 #include "kf_gins_ros2_native/kf_core_interface.hpp"
+#include "adapter.hpp"
 #include "kf_gins_ros2_native/geo.hpp"
 #include "kf_gins_ros2_native/node_factory.hpp"
 
@@ -35,8 +40,25 @@ public:
     base_frame_   = this->declare_parameter<std::string>("base_frame", "base_link");
     odom_frame_   = this->declare_parameter<std::string>("odom_frame", "odom");
     imu_topic_    = this->declare_parameter<std::string>("imu_topic", "/imu/data");
-    gnss_topic_   = this->declare_parameter<std::string>("gnss_topic", "/gps/fix_cov");
+    gnss_topic_   = this->declare_parameter<std::string>("gnss_topic", "/gps/fix");
     imu_is_delta_ = this->declare_parameter<bool>("imu_is_delta", false);
+
+    // 时间与鲁棒性：MAVROS 可能发生时间跳变；用 node clock（可为 /clock）能更稳定
+    use_node_time_for_core_ = this->declare_parameter<bool>("use_node_time_for_core", true);
+    // 以 IMU dt 积分出 core 时间轴（强烈推荐）：避免外部时间戳跳变/重复/回退导致发散
+    use_integrated_time_for_core_ = this->declare_parameter<bool>("use_integrated_time_for_core", true);
+    // 用稳态时钟计算 IMU dt，避免上游时间戳跳变/重复导致 dt=0 或时间回退
+    use_steady_time_for_imu_dt_ = this->declare_parameter<bool>("use_steady_time_for_imu_dt", true);
+    // 强制 core 的时间单调递增（当上游时间回退时，自动修正）
+    force_monotonic_time_for_core_ = this->declare_parameter<bool>("force_monotonic_time_for_core", true);
+    min_imu_dt_sec_ = this->declare_parameter<double>("min_imu_dt_sec", 1e-3);
+    // 【v4.0修复】仿真环境IMU dt可能突变，从0.20改为0.50秒，以容忍偶发的大跳变
+    max_imu_dt_sec_ = this->declare_parameter<double>("max_imu_dt_sec", 0.50);
+    imu_dt_estimate_sec_ = this->declare_parameter<double>("imu_dt_estimate_sec", 0.01);
+    // 当检测到时间回退/大跳变时，自动重置时间基与 core（避免“乱飞/蜘蛛网”）
+    auto_reset_on_time_jump_ = this->declare_parameter<bool>("auto_reset_on_time_jump", true);
+    time_jump_reset_threshold_sec_ = this->declare_parameter<double>("time_jump_reset_threshold_sec", 0.5);
+    gnss_time_offset_sec_ = this->declare_parameter<double>("gnss_time_offset_sec", 0.001);
 
     path_rate_hz_    = this->declare_parameter<double>("path_publish_rate_hz", 5.0);
     pose_decimation_ = this->declare_parameter<int>("pose_decimation", 10);
@@ -50,14 +72,42 @@ public:
     max_jump_m_  = this->declare_parameter<double>("max_jump_m", 200.0);    // Path 点之间最大允许跳变
     align_gate_m_ = this->declare_parameter<double>("align_gate_m", 300.0); // 核心LLH与GNSS对齐门限
 
+    // GNSS std：MAVROS 的 NavSatFix 常常不提供 COVARIANCE_TYPE_DIAGONAL_KNOWN
+    // 若 std 为负/为 0，会导致核心数值崩坏（协方差非正定/NaN）。
+    use_sim_gnss_std_ = this->declare_parameter<bool>("use_sim_gnss_std", true);  // 【修复】仿真模式标志
+    gnss_default_std_h_m_ = this->declare_parameter<double>("gnss_default_std_h_m", 5.0);  // N/E default (实机)
+    gnss_default_std_u_m_ = this->declare_parameter<double>("gnss_default_std_u_m", 10.0); // U default (实机)
+    sim_gnss_std_h_m_ = this->declare_parameter<double>("sim_gnss_std_h_m", 0.1);  // 【修复】仿真 N/E std
+    sim_gnss_std_u_m_ = this->declare_parameter<double>("sim_gnss_std_u_m", 0.2);  // 【修复】仿真 U std
+    gnss_min_std_m_       = this->declare_parameter<double>("gnss_min_std_m", 0.5);        // clamp floor
+
     // 追加参数（可被 launch 覆盖）
     start_after_gnss_sec_ = this->declare_parameter<double>("start_after_gnss_sec", 1.0); // 收到 GNSS 后先等一会再画
     publish_after_sec_    = this->declare_parameter<double>("publish_after_sec",    2.0); // 节点启动后整体预热
     reset_gate_m_         = this->declare_parameter<double>("reset_gate_m",        20.0); // 发生大跳变时，清空 Path 重画
+    // 当 KF-GINS 数值发散到 NaN/Inf 时，自动 reset（用最近 GNSS fix 重新初始化）
+    auto_reset_on_invalid_state_ = this->declare_parameter<bool>("auto_reset_on_invalid_state", true);
+    invalid_state_reset_cooldown_sec_ = this->declare_parameter<double>("invalid_state_reset_cooldown_sec", 5.0);
 
+    // 可视化 gating：默认不影响行为（bringup/对比可按需打开）
+    mavros_state_topic_ = this->declare_parameter<std::string>("mavros_state_topic", "/mavros/state");
+    path_require_armed_ = this->declare_parameter<bool>("path_require_armed", false);
+    clear_path_on_arm_transition_ = this->declare_parameter<bool>("clear_path_on_arm_transition", false);
+    use_gnss_llh_for_pose_when_disarmed_ =
+      this->declare_parameter<bool>("use_gnss_llh_for_pose_when_disarmed", true);
+
+    // 【修复】零速度更新 (ZUPT) - 无人机未启动时使用 GNSS 复位以强约束速度
+    use_zero_velocity_update_when_disarmed_ = this->declare_parameter<bool>("use_zero_velocity_update_when_disarmed", true);
+    zupt_reset_interval_sec_ = this->declare_parameter<double>("zupt_reset_interval_sec", 1.0);
+    zupt_std_mps_ = this->declare_parameter<double>("zupt_std_mps", 0.05);  // 预留：未来可接入真 ZUPT 观测
+    disarmed_yaw_lock_enable_ = this->declare_parameter<bool>("disarmed_yaw_lock_enable", true);
+    disarmed_yaw_lock_interval_sec_ = this->declare_parameter<double>("disarmed_yaw_lock_interval_sec", 1.0);
+    disarmed_yaw_lock_max_yaw_err_deg_ = this->declare_parameter<double>("disarmed_yaw_lock_max_yaw_err_deg", 5.0);
 
     // ---- core ----
-    core_ = kfcore::create_kf_core();
+    kfcore::AdapterConfig core_cfg;
+    core_cfg.imu_is_delta = imu_is_delta_;
+    core_ = kfcore::create_kf_core_adapter(core_cfg);
     if (!core_) throw std::runtime_error("no core");
     if (!config_path_.empty())
       if (!core_->configure(config_path_))
@@ -68,12 +118,15 @@ public:
     path_pub_ = this->create_publisher<nav_msgs::msg::Path>("kf_gins/path", 10);
     pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("kf_gins/pose", 10);
     path_msg_.header.frame_id = map_frame_;
+    path_msg_.header.stamp = now();
+    path_pub_->publish(path_msg_);  // 清空 RViz 残留 Path（空 Path 覆盖）
 
     if (path_rate_hz_ > 0.0) {
       const int period_ms = static_cast<int>(1000.0 / std::max(1.0, path_rate_hz_));
       path_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(period_ms),
         [this]() {
+          if (path_require_armed_ && !mavros_armed_) return;
           if (!have_origin_ || path_msg_.poses.empty()) return;
           path_msg_.header.stamp = this->now();
           path_pub_->publish(path_msg_);
@@ -88,6 +141,34 @@ public:
     gnss_sub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
       gnss_topic_, gnss_qos, std::bind(&KFGinsNativeNode::gnssCb, this, _1));
 
+    auto state_qos = rclcpp::QoS(rclcpp::KeepLast(10)).reliable().durability_volatile();
+    mavros_state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
+      mavros_state_topic_, state_qos, std::bind(&KFGinsNativeNode::mavrosStateCb, this, _1));
+
+    // 【关键修复】订阅 MAVROS IMU 获取 EKF2 的磁力计融合航向
+    // KF-GINS 没有磁力计，需要从 PX4 EKF2 获取初始航向
+    auto mavros_imu_qos = rclcpp::SensorDataQoS().keep_last(10);
+    mavros_imu_heading_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+      "/mavros/imu/data", mavros_imu_qos,
+      [this](const sensor_msgs::msg::Imu::SharedPtr msg) {
+        // Skip if no valid orientation
+        if (msg->orientation.w == 0.0 && msg->orientation.x == 0.0 &&
+            msg->orientation.y == 0.0 && msg->orientation.z == 0.0) return;
+        // MAVROS orientation: body FLU → world ENU
+        // Extract yaw in ENU convention (0=East, π/2=North)
+        tf2::Quaternion q(msg->orientation.x, msg->orientation.y,
+                          msg->orientation.z, msg->orientation.w);
+        double roll_enu, pitch_enu, yaw_enu;
+        tf2::Matrix3x3(q).getRPY(roll_enu, pitch_enu, yaw_enu);
+        // Convert ENU yaw to NED yaw: yaw_NED = π/2 - yaw_ENU
+        double yaw_ned = M_PI / 2.0 - yaw_enu;
+        // Normalize to [-π, π]
+        while (yaw_ned > M_PI) yaw_ned -= 2.0 * M_PI;
+        while (yaw_ned < -M_PI) yaw_ned += 2.0 * M_PI;
+        mavros_heading_ned_deg_ = yaw_ned * 180.0 / M_PI;
+        have_mavros_heading_ = true;
+      });
+
     tf_broadcaster_     = std::make_shared<tf2_ros::TransformBroadcaster>(this);
     static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
 
@@ -100,42 +181,248 @@ public:
     static_broadcaster_->sendTransform(t);
 
     node_start_time_ = now();
+    last_core_time_ = -std::numeric_limits<double>::infinity();
 
   }
 
 private:
+  void clearPath_(const char* reason)
+  {
+    (void)reason;
+    path_msg_.poses.clear();
+    have_last_path_ = false;
+    have_last_enu_ = false;
+    dec_ = 0;
+    path_msg_.header.stamp = now();
+    path_msg_.header.frame_id = map_frame_;
+    path_pub_->publish(path_msg_);  // 用空 Path 覆盖，清理 RViz “蜘蛛网”
+  }
+
+  void mavrosStateCb(const mavros_msgs::msg::State::SharedPtr msg)
+  {
+    const bool prev_armed = mavros_armed_;
+    mavros_armed_ = msg->armed;
+
+    if (prev_armed != mavros_armed_) {
+      last_disarmed_yaw_lock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    }
+
+    if (clear_path_on_arm_transition_ && prev_armed != mavros_armed_) {
+      clearPath_(mavros_armed_ ? "armed transition" : "disarmed transition");
+    }
+    if (!prev_armed && mavros_armed_) {
+      // 【v5.0修复】起飞时不再重置 IMU 时间基。
+      // IMU 以 ~50Hz 连续发送，arm 前后没有时间间断。
+      // 旧代码重置 have_prev_imu_=false 会导致下一次 imuCb 将
+      // core_time_sec_ 重置为 0，而 engine 内部 imupre_.time 仍为
+      // 旧值(~221s)，造成时间跳变，使 GNSS 更新失效。
+      // 现在只清空 Path 可视化残留（如果启用了 clear_path_on_arm_transition_）。
+      RCLCPP_INFO(get_logger(), "Armed transition: keeping IMU time base continuous.");
+    }
+  }
+
+  double rawTimeSecFromMsg_(const builtin_interfaces::msg::Time& stamp) const
+  {
+    return rclcpp::Time(stamp).seconds();
+  }
+
+  double rawTimeSecNow_() const
+  {
+    return this->now().seconds();
+  }
+
+  // 获取来自 MAVROS (EKF2 磁力计融合) 的航向，如果不可用则返回 0
+  double getInitialYawDeg_() const {
+    return have_mavros_heading_ ? mavros_heading_ned_deg_ : 0.0;
+  }
+
+  static double normalizeAngleDeg_(double deg)
+  {
+    while (deg > 180.0) deg -= 360.0;
+    while (deg < -180.0) deg += 360.0;
+    return deg;
+  }
+
+  static double shortestAngleDiffDeg_(double a_deg, double b_deg)
+  {
+    return normalizeAngleDeg_(a_deg - b_deg);
+  }
+
+  void resetCoreForDisarmedYawLock_(double yaw_err_deg)
+  {
+    if (!last_gnss_valid_ || !have_mavros_heading_) return;
+
+    const double yaw_lock_deg = getInitialYawDeg_();
+    (void)core_->reset(last_gnss_lat_rad_ * 180.0 / M_PI,
+                       last_gnss_lon_rad_ * 180.0 / M_PI,
+                       last_gnss_h_m_,
+                       yaw_lock_deg);
+
+    core_initialized_ = true;
+    core_llh_aligned_ = false;
+
+    // Restart the inertial time base so the next IMU sample anchors the fresh core.
+    have_prev_imu_ = false;
+    have_raw_time_zero_ = false;
+    prev_imu_raw_rel_sec_ = 0.0;
+    core_time_sec_ = 0.0;
+    last_core_time_ = -std::numeric_limits<double>::infinity();
+    last_gnss_time_sec_ = -std::numeric_limits<double>::infinity();
+    have_prev_gnss_for_vel_ = false;
+    last_zupt_reset_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+
+    clearPath_("disarmed yaw lock");
+
+    RCLCPP_WARN(
+      get_logger(),
+      "Disarmed yaw lock applied: reset core yaw to MAVROS heading %.2f deg (yaw error %.2f deg)",
+      yaw_lock_deg, yaw_err_deg);
+  }
+
+  void resetFilterAndTimeBase_(const char* reason)
+  {
+    RCLCPP_WARN(get_logger(), "Resetting core/time-base: %s", reason);
+
+    have_prev_imu_ = false;
+    have_raw_time_zero_ = false;
+    prev_imu_raw_rel_sec_ = 0.0;
+    core_time_sec_ = 0.0;
+    last_core_time_ = -std::numeric_limits<double>::infinity();
+    last_gnss_time_sec_ = -std::numeric_limits<double>::infinity();
+
+    // 清空可视化轨迹，避免“蜘蛛网”
+    path_msg_.poses.clear();
+    have_last_path_ = false;
+    have_last_enu_ = false;
+    allow_paint_ = false;
+    have_first_gnss_stamp_ = false;
+
+    // 让后续 GNSS 重新设置 ENU 原点
+    have_origin_ = false;
+    core_initialized_ = false;
+    have_prev_gnss_for_vel_ = false;
+
+    if (last_gnss_valid_) {
+      const double init_yaw = getInitialYawDeg_();
+      (void)core_->reset(last_gnss_lat_rad_ * 180.0 / M_PI,
+                         last_gnss_lon_rad_ * 180.0 / M_PI,
+                         last_gnss_h_m_,
+                         init_yaw);
+      core_initialized_ = true;
+      RCLCPP_WARN(get_logger(), "Core reset to last GNSS fix. yaw=%.1f deg (mavros=%s)",
+                  init_yaw, have_mavros_heading_ ? "yes" : "no");
+    }
+  }
+
   // ------------------------- Callbacks -------------------------
   void imuCb(const sensor_msgs::msg::Imu::SharedPtr msg)
   {
-    const double t = rclcpp::Time(msg->header.stamp).seconds();
+    const double raw_t = use_node_time_for_core_ ? rawTimeSecNow_() : rawTimeSecFromMsg_(msg->header.stamp);
+    const rclcpp::Time steady_now = steady_clock_.now();
+
     if (!have_prev_imu_) {
-      prev_imu_time_ = t;
+      prev_imu_time_ = raw_t;
+      prev_imu_steady_time_ = steady_now;
       have_prev_imu_ = true;
+      have_raw_time_zero_ = false;
+      prev_imu_raw_rel_sec_ = 0.0;
+      core_time_sec_ = 0.0;
+      last_core_time_ = -std::numeric_limits<double>::infinity();
       return;
     }
-    const double dt = std::max(1e-3, t - prev_imu_time_);
-    prev_imu_time_  = t;
+
+    // 1) 计算 raw dt（保证 t 与 dt 使用同一时间基准）
+    double dt_candidate = 0.0;
+    const bool use_raw_time_for_dt = use_node_time_for_core_ || !use_steady_time_for_imu_dt_;
+    if (use_raw_time_for_dt) {
+      if (!have_raw_time_zero_) {
+        raw_time_zero_sec_ = prev_imu_time_;
+        have_raw_time_zero_ = true;
+        prev_imu_raw_rel_sec_ = 0.0;
+      }
+      const double raw_rel = raw_t - raw_time_zero_sec_;
+      const double prev_rel = prev_imu_raw_rel_sec_;
+      dt_candidate = raw_rel - prev_rel;
+      prev_imu_raw_rel_sec_ = raw_rel;
+      prev_imu_time_ = raw_t;
+    } else {
+      dt_candidate = (steady_now - prev_imu_steady_time_).seconds();
+      prev_imu_steady_time_ = steady_now;
+    }
+
+    // 2) 时间跳变检测：/clock reset 或上游时间戳回退
+    if (auto_reset_on_time_jump_ && std::isfinite(dt_candidate) &&
+        dt_candidate < -time_jump_reset_threshold_sec_) {
+      resetFilterAndTimeBase_("time went backwards (large jump)");
+      return;
+    }
+
+    // 3) dt 过滤/估计
+    double dt = dt_candidate;
+    if (!std::isfinite(dt) || dt <= 0.0 || dt > max_imu_dt_sec_) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "IMU dt invalid/jump (dt=%.6f s). Using estimate %.6f s.",
+        dt, imu_dt_estimate_sec_);
+      dt = imu_dt_estimate_sec_;
+    } else {
+      dt = std::clamp(dt, min_imu_dt_sec_, max_imu_dt_sec_);
+      // EMA 更新估计值：新的valid dt贡献20%，历史贡献80%
+      // 【v4.0修复】改为0.8 alpha，降低EMA权重，让估计值更快适应dt变化
+      imu_dt_estimate_sec_ = 0.80 * imu_dt_estimate_sec_ + 0.20 * dt;
+    }
+
+    // 4) 生成送入 core 的时间戳：推荐用 dt 积分出的单调时间轴
+    double t = raw_t;
+    if (use_integrated_time_for_core_) {
+      core_time_sec_ += dt;
+      t = core_time_sec_;
+    }
+    if (force_monotonic_time_for_core_) {
+      if (std::isfinite(last_core_time_) && t <= last_core_time_) {
+        t = last_core_time_ + dt;
+      }
+    }
 
     Eigen::Vector3d dtheta, dvel;
     if (imu_is_delta_) {
       dtheta = {msg->angular_velocity.x,   msg->angular_velocity.y,   msg->angular_velocity.z};
       dvel   = {msg->linear_acceleration.x,msg->linear_acceleration.y,msg->linear_acceleration.z};
     } else {
-      dtheta = Eigen::Vector3d(msg->angular_velocity.x,
-                               msg->angular_velocity.y,
-                               msg->angular_velocity.z) * dt;
-      dvel   = Eigen::Vector3d(msg->linear_acceleration.x,
-                               msg->linear_acceleration.y,
-                               msg->linear_acceleration.z) * dt;
+      // 注意：kf_gins_adapter 会在 imu_is_delta=false 时将“角速度/比力”乘以 dt 转为增量。
+      // 因此这里传入原始角速度(rad/s)与比力(m/s^2)，避免重复乘 dt 导致 dt^2 的数值错误。
+      dtheta = {msg->angular_velocity.x,   msg->angular_velocity.y,   msg->angular_velocity.z};
+      dvel   = {msg->linear_acceleration.x,msg->linear_acceleration.y,msg->linear_acceleration.z};
     }
 
-    core_->ingestImu(t, dtheta, dvel, dt, imu_is_delta_);
+    if (!dtheta.allFinite() || !dvel.allFinite()) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "IMU contains NaN/Inf, skipping.");
+      return;
+    }
+
+    if (!core_->ingestImu(t, dtheta, dvel, dt, imu_is_delta_)) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "core_->ingestImu() failed");
+      return;
+    }
+    last_core_time_ = t;
     publishState();
   }
 
   void gnssCb(const sensor_msgs::msg::NavSatFix::SharedPtr msg)
   {
-    const double t = rclcpp::Time(msg->header.stamp).seconds();
+    double t_raw = use_node_time_for_core_ ? rawTimeSecNow_() : rawTimeSecFromMsg_(msg->header.stamp);
+    double t = t_raw;
+
+    // 支持 dropzones：当上游发布 NO_FIX（例如 GPS 遮挡段），这里直接跳过 GNSS 更新
+    if (msg->status.status == sensor_msgs::msg::NavSatStatus::STATUS_NO_FIX) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "GNSS status=NO_FIX, skipping update.");
+      return;
+    }
+
+    if (!std::isfinite(msg->latitude) || !std::isfinite(msg->longitude) || !std::isfinite(msg->altitude)) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "GNSS contains NaN/Inf, skipping.");
+      return;
+    }
 
     // 第一次用 GNSS 设置 ENU 原点
     if (!have_origin_) {
@@ -152,26 +439,161 @@ private:
                   msg->latitude, msg->longitude, msg->altitude);
     }
 
+    // 第一次 GNSS 同时用于初始化/重置核心，避免从 (0,0,0) 等不合理状态起算导致数值问题
+    if (!core_initialized_) {
+      const double init_yaw = getInitialYawDeg_();
+      (void)core_->reset(msg->latitude, msg->longitude, msg->altitude, init_yaw);
+      core_initialized_ = true;
+      RCLCPP_INFO(this->get_logger(), "Core reset by first GNSS fix. yaw=%.1f deg (mavros=%s)",
+                  init_yaw, have_mavros_heading_ ? "yes" : "no");
+    }
+
+    // GNSS 时间戳必须落在 IMU 时间轴上（用于插值/更新）；推荐绑定到“当前 core 时间”
+    if (use_integrated_time_for_core_) {
+      const double base = std::isfinite(last_core_time_) ? last_core_time_ : 0.0;
+      const double offset = std::clamp(gnss_time_offset_sec_, 1e-6, 0.1);
+      t = base + offset;
+      if (std::isfinite(last_gnss_time_sec_)) {
+        t = std::max(t, last_gnss_time_sec_ + 1e-3);
+      }
+    } else if (force_monotonic_time_for_core_) {
+      if (std::isfinite(last_core_time_) && t <= last_core_time_) {
+        // GNSS 是低频的：用一个很小的前移，确保严格单调
+        t = last_core_time_ + 1e-3;
+      }
+    }
+
     Eigen::Vector3d std_ned(-1,-1,-1);
-    if (msg->position_covariance_type == sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_DIAGONAL_KNOWN) {
+    
+    // 【关键修复】始终检查仿真模式，如果启用则直接使用仿真参数
+    // （即使msg中有协方差，也优先信任仿真参数）
+    if (use_sim_gnss_std_) {
+      // 仿真模式：直接使用仿真参数，不经过 gnss_min_std_m_ clamp
+      // 【关键修复】旧代码 std::max(gnss_min_std_m_=0.5, sim_gnss_std=0.1) 导致
+      // GNSS std 始终被抬高到 0.5m，使 GNSS 观测信任度降低 25 倍 → 位置发散
+      const double floor = 0.01;  // 仅防止 std=0 导致 R=0
+      std_ned = Eigen::Vector3d(
+        std::max(floor, sim_gnss_std_h_m_),
+        std::max(floor, sim_gnss_std_h_m_),
+        std::max(floor, sim_gnss_std_u_m_));
+      if (!have_sim_gnss_logged_) {
+        RCLCPP_INFO(get_logger(), "✓ Simulation GNSS mode: std_h=%.3fm, std_u=%.3fm (no min-clamp)", 
+                    sim_gnss_std_h_m_, sim_gnss_std_u_m_);
+        have_sim_gnss_logged_ = true;
+      }
+    } else if (msg->position_covariance_type == sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_DIAGONAL_KNOWN) {
+      // 实机模式 + msg有协方差：使用msg中的协方差
       const double std_e = std::sqrt(std::max(0.0, msg->position_covariance[0]));
       const double std_n = std::sqrt(std::max(0.0, msg->position_covariance[4]));
       const double std_u = std::sqrt(std::max(0.0, msg->position_covariance[8]));
-      std_ned = {std_n, std_e, std_u};
+      // clamp：避免 std=0 造成 R=0 或数值发散
+      std_ned = Eigen::Vector3d(
+        std::max(gnss_min_std_m_, std_n),
+        std::max(gnss_min_std_m_, std_e),
+        std::max(gnss_min_std_m_, std_u));
+    } else {
+      // 实机模式 + msg无协方差：使用默认实机参数
+      std_ned = Eigen::Vector3d(
+        std::max(gnss_min_std_m_, gnss_default_std_h_m_),
+        std::max(gnss_min_std_m_, gnss_default_std_h_m_),
+        std::max(gnss_min_std_m_, gnss_default_std_u_m_));
     }
-
-    core_->ingestGnss(t, msg->latitude, msg->longitude, msg->altitude, std_ned);
 
     last_gnss_lat_rad_ = msg->latitude  * M_PI/180.0;
     last_gnss_lon_rad_ = msg->longitude * M_PI/180.0;
     last_gnss_h_m_     = msg->altitude;
     last_gnss_valid_   = true;
 
+    if (disarmed_yaw_lock_enable_ && !mavros_armed_ && core_initialized_ && have_mavros_heading_) {
+      const double now_sec = now().seconds();
+      const bool interval_elapsed =
+        !std::isfinite(last_disarmed_yaw_lock_time_sec_) ||
+        (now_sec - last_disarmed_yaw_lock_time_sec_) >=
+          std::max(0.1, disarmed_yaw_lock_interval_sec_);
+
+      if (interval_elapsed) {
+        const auto st = core_->current();
+        const double yaw_err_deg = std::abs(shortestAngleDiffDeg_(st.yaw_deg, mavros_heading_ned_deg_));
+        last_disarmed_yaw_lock_time_sec_ = now_sec;
+
+        if (!std::isfinite(st.yaw_deg) ||
+            yaw_err_deg >= std::max(0.0, disarmed_yaw_lock_max_yaw_err_deg_)) {
+          resetCoreForDisarmedYawLock_(yaw_err_deg);
+          return;
+        }
+      }
+    }
+
     if (!have_first_gnss_stamp_) {
       first_gnss_stamp_ = now();
       have_first_gnss_stamp_ = true;
     }
 
+    // 【关键修复】ZUPT: 使用零速度观测代替破坏性全滤波器重置
+    // 旧代码每秒调用 core_->reset(yaw=0)，完全销毁偏差估计、协方差矩阵和航向信息。
+    // 当无人机起飞时航向=0（错误），导致 INS 机械编排方向错误 → 位置指数级发散。
+    // 新代码注入零速度观测 (proper ZUPT)，保留航向和偏差估计。
+    bool zupt_applied = false;
+    if (use_zero_velocity_update_when_disarmed_ && !mavros_armed_) {
+      const double now_sec = now().seconds();
+      const bool need_zupt =
+        !std::isfinite(last_zupt_reset_time_sec_) ||
+        (now_sec - last_zupt_reset_time_sec_) >= zupt_reset_interval_sec_;
+      if (need_zupt) {
+        Eigen::Vector3d zero_vel_std(zupt_std_mps_, zupt_std_mps_, zupt_std_mps_);
+        core_->ingestGnssVel(t, 0.0, 0.0, 0.0, zero_vel_std);
+        last_zupt_reset_time_sec_ = now_sec;
+        zupt_applied = true;
+      }
+      // 不再 return，让 GNSS 位置观测正常处理
+    }
+
+    if (!core_->ingestGnss(t, msg->latitude, msg->longitude, msg->altitude, std_ned)) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "core_->ingestGnss() failed");
+      return;
+    }
+
+    // ────── GNSS 速度观测（从连续 GNSS 位置差分计算） ──────
+    // GNSS velocity derived from consecutive position fixes
+    // 这是解决姿态（尤其 yaw）不可观的关键：速度观测让 H 矩阵覆盖了 V 状态，
+    // 通过 F 矩阵中的 V↔PHI 耦合，间接使姿态可观。
+    // 当 ZUPT 已应用时跳过（ZUPT 的 0.05 m/s std 比位置差分的 ~0.7 m/s 更紧）
+    if (!zupt_applied && have_prev_gnss_for_vel_) {
+      const double dt_gnss = t - prev_gnss_vel_time_;
+      if (std::isfinite(dt_gnss) && dt_gnss > 0.05 && dt_gnss < 5.0) {
+        const double lat_avg = (msg->latitude * M_PI/180.0 + prev_gnss_vel_lat_rad_) * 0.5;
+        const double dlat_rad = msg->latitude * M_PI/180.0 - prev_gnss_vel_lat_rad_;
+        const double dlon_rad = msg->longitude * M_PI/180.0 - prev_gnss_vel_lon_rad_;
+        const double dh = msg->altitude - prev_gnss_vel_h_;
+
+        // 使用简化的地球半径（WGS84 平均值）
+        const double R_earth = 6371000.0;
+        const double vN =  dlat_rad * R_earth / dt_gnss;
+        const double vE =  dlon_rad * R_earth * std::cos(lat_avg) / dt_gnss;
+        const double vD = -dh / dt_gnss;
+
+        if (std::isfinite(vN) && std::isfinite(vE) && std::isfinite(vD)) {
+          // 位置差分速度的 std ≈ sqrt(2) * pos_std / dt_gnss
+          // 【关键修复】仿真模式下降低 vel_std 下限：
+          // 旧代码 max(0.5, 0.14) = 0.5 m/s，R 膨胀 12.6× → yaw 可观性严重不足
+          const double vel_floor_h = use_sim_gnss_std_ ? 0.05 : 0.5;
+          const double vel_floor_u = use_sim_gnss_std_ ? 0.1  : 1.0;
+          const double vel_std_h = std::max(vel_floor_h, std::sqrt(2.0) * std_ned.x() / dt_gnss);
+          const double vel_std_u = std::max(vel_floor_u, std::sqrt(2.0) * std_ned.z() / dt_gnss);
+          Eigen::Vector3d vel_std(vel_std_h, vel_std_h, vel_std_u);
+
+          core_->ingestGnssVel(t, vN, vE, vD, vel_std);
+        }
+      }
+    }
+    prev_gnss_vel_lat_rad_ = msg->latitude  * M_PI/180.0;
+    prev_gnss_vel_lon_rad_ = msg->longitude * M_PI/180.0;
+    prev_gnss_vel_h_       = msg->altitude;
+    prev_gnss_vel_time_    = t;
+    have_prev_gnss_for_vel_ = true;
+
+    last_core_time_ = t;
+    last_gnss_time_sec_ = t;
 
     publishState();
   }
@@ -180,13 +602,12 @@ private:
   void publishState()
   {
     if (!have_origin_) return;
-    // 预热：节点整体先等 publish_after_sec_ 秒；且收到 GNSS 后再等 start_after_gnss_sec_ 秒
+    // 预热逻辑只影响 Path（可视化），不应阻塞 /kf_gins/odom（否则看起来像 IEKF “没了”）
     if (!allow_paint_) {
       const bool warmup_ok = (now() - node_start_time_).seconds() >= publish_after_sec_;
       const bool gnss_ok   = have_first_gnss_stamp_ &&
-                            (now() - first_gnss_stamp_).seconds() >= start_after_gnss_sec_;
+                             (now() - first_gnss_stamp_).seconds() >= start_after_gnss_sec_;
       if (warmup_ok && gnss_ok) allow_paint_ = true;
-      else return; // 预热没过，不画
     }
 
 
@@ -198,13 +619,47 @@ private:
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
         "State NaN/Inf (lat=%.3f lon=%.3f h=%.3f rpy=%.3f/%.3f/%.3f)",
         st.lat_deg, st.lon_deg, st.h_m, st.roll_deg, st.pitch_deg, st.yaw_deg);
+
+      if (auto_reset_on_invalid_state_ && last_gnss_valid_) {
+        const double now_sec = now().seconds();
+        if (!std::isfinite(last_invalid_reset_time_sec_) ||
+            (now_sec - last_invalid_reset_time_sec_) >= invalid_state_reset_cooldown_sec_) {
+          last_invalid_reset_time_sec_ = now_sec;
+          const double reset_yaw = getInitialYawDeg_();
+          RCLCPP_WARN(get_logger(),
+                      "Auto-reset core due to invalid state. yaw=%.1f deg", reset_yaw);
+          (void)core_->reset(last_gnss_lat_rad_ * 180.0/M_PI,
+                             last_gnss_lon_rad_ * 180.0/M_PI,
+                             last_gnss_h_m_,
+                             reset_yaw);
+          core_initialized_ = true;
+          core_llh_aligned_ = false;
+
+          // 清空 Path，避免一堆“乱飞线”
+          path_msg_.poses.clear();
+          have_last_path_ = false;
+          have_last_enu_ = false;
+
+          // 重新等待 GNSS 对齐后再画 Path（odom 会继续发布）
+          allow_paint_ = false;
+          node_start_time_ = now();
+          have_first_gnss_stamp_ = false;
+          have_prev_imu_ = false;
+        }
+      }
       return;
     }
 
-    // 1) 姿态：明确用“度→弧度”
-    const double roll_rad  = st.roll_deg  * M_PI/180.0;
-    const double pitch_rad = st.pitch_deg * M_PI/180.0;
-    const double yaw_rad   = st.yaw_deg   * M_PI/180.0;
+    // 1) 姿态：NED欧拉角 → ENU欧拉角
+    // KF-GINS 内部使用 NED/FRD 坐标系，matrix2euler(Cbn) 输出 [roll_NED, pitch_NED, yaw_NED]
+    // ROS/tf2 使用 ENU/FLU 坐标系，setRPY 期望 [roll_ENU, pitch_ENU, yaw_ENU]
+    // 转换关系（通过 R_ENU_from_FLU = R_ENU_from_NED * Cbn * R_FRD_from_FLU 推导）：
+    //   roll_ENU  =  roll_NED   （前轴方向相同）
+    //   pitch_ENU = -pitch_NED  （Y轴翻转：Right→Left）
+    //   yaw_ENU   = π/2 - yaw_NED （Z轴翻转 + 90°旋转：North→East参考）
+    const double roll_rad  =  st.roll_deg  * M_PI/180.0;
+    const double pitch_rad = -st.pitch_deg * M_PI/180.0;
+    const double yaw_rad   =  M_PI/2.0 - st.yaw_deg * M_PI/180.0;
 
     // 2) 位置：启动阶段即便 use_gnss_llh_for_pose_==false，也优先用 GNSS，直到核心LLH和GNSS对齐
     double lat_rad, lon_rad, h_m;
@@ -228,7 +683,8 @@ private:
         core_llh_aligned_ = true;
 
       // 选择用于可视化的位置
-      if (use_gnss_llh_for_pose_ || !core_llh_aligned_) {
+      if ((use_gnss_llh_for_pose_when_disarmed_ && !mavros_armed_) ||
+          use_gnss_llh_for_pose_ || !core_llh_aligned_) {
         lat_rad = last_gnss_lat_rad_;
         lon_rad = last_gnss_lon_rad_;
         h_m     = last_gnss_h_m_;
@@ -294,6 +750,8 @@ private:
     odom_pub_->publish(od);
 
     // ---------------- Path 追加（只按距离与抽稀，不丢弃） ----------------
+    if (!allow_paint_) return;
+    if (path_require_armed_ && !mavros_armed_) return;
     if (++dec_ >= pose_decimation_) {
       dec_ = 0;
         // —— 新增：如果和上一个点距离太远，直接丢弃，防止“竖线/天线”
@@ -352,9 +810,19 @@ private:
   int    pose_decimation_{10};
   int    max_path_pts_{20000};
   bool   use_gnss_llh_for_pose_{true};
+  bool   use_gnss_llh_for_pose_when_disarmed_{true};
   double max_jump_m_{200.0};
   double align_gate_m_{300.0};
   bool   core_llh_aligned_{false};  // 核心的LLH是否已与最近GNSS对齐
+
+  // GNSS std fallback/clamp
+  bool use_sim_gnss_std_{true};  // 【修复】仿真模式标志
+  bool have_sim_gnss_logged_{false};  // 【修复】避免重复日志
+  double gnss_default_std_h_m_{5.0};
+  double gnss_default_std_u_m_{10.0};
+  double sim_gnss_std_h_m_{0.1};  // 【修复】仿真水平std
+  double sim_gnss_std_u_m_{0.2};  // 【修复】仿真竖直std
+  double gnss_min_std_m_{0.5};
 
   // 预热/启画控制
   double start_after_gnss_sec_{1.0};
@@ -365,6 +833,25 @@ private:
   rclcpp::Time first_gnss_stamp_;
   bool have_first_gnss_stamp_{false};
 
+  // MAVROS state gating (optional)
+  std::string mavros_state_topic_{"/mavros/state"};
+  bool path_require_armed_{false};
+  bool clear_path_on_arm_transition_{false};
+  bool mavros_armed_{false};
+
+  // 【关键修复】MAVROS 航向 (来自 EKF2 磁力计融合)
+  bool have_mavros_heading_{false};
+  double mavros_heading_ned_deg_{0.0};
+
+  // 【修复】零速度更新 (ZUPT) - 无人机未启动时
+  bool use_zero_velocity_update_when_disarmed_{true};
+  double zupt_reset_interval_sec_{1.0};
+  double zupt_std_mps_{0.05};
+  double last_zupt_reset_time_sec_{std::numeric_limits<double>::quiet_NaN()};
+  bool disarmed_yaw_lock_enable_{true};
+  double disarmed_yaw_lock_interval_sec_{1.0};
+  double disarmed_yaw_lock_max_yaw_err_deg_{5.0};
+  double last_disarmed_yaw_lock_time_sec_{std::numeric_limits<double>::quiet_NaN()};
 
 
   // ---- core ----
@@ -383,6 +870,8 @@ private:
   std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gnss_sub_;
+  rclcpp::Subscription<mavros_msgs::msg::State>::SharedPtr mavros_state_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr mavros_imu_heading_sub_;
   rclcpp::TimerBase::SharedPtr path_timer_;
 
   // ---- messages ----
@@ -391,6 +880,32 @@ private:
   // ---- IMU dt ----
   bool   have_prev_imu_{false};
   double prev_imu_time_{0.0};
+  rclcpp::Clock steady_clock_{RCL_STEADY_TIME};
+  rclcpp::Time prev_imu_steady_time_{0, 0, RCL_STEADY_TIME};
+
+  // ---- time source / robustness ----
+  bool use_node_time_for_core_{true};
+  bool use_integrated_time_for_core_{true};
+  bool use_steady_time_for_imu_dt_{true};
+  bool force_monotonic_time_for_core_{true};
+  double min_imu_dt_sec_{1e-3};
+  double max_imu_dt_sec_{0.20};
+  double imu_dt_estimate_sec_{0.01};
+  bool auto_reset_on_time_jump_{true};
+  double time_jump_reset_threshold_sec_{0.5};
+  double gnss_time_offset_sec_{0.001};
+  bool core_initialized_{false};
+  double last_core_time_{-std::numeric_limits<double>::infinity()};
+  double last_gnss_time_sec_{-std::numeric_limits<double>::infinity()};
+  bool auto_reset_on_invalid_state_{true};
+  double invalid_state_reset_cooldown_sec_{5.0};
+  double last_invalid_reset_time_sec_{std::numeric_limits<double>::quiet_NaN()};
+
+  // ---- internal time base (relative) ----
+  bool have_raw_time_zero_{false};
+  double raw_time_zero_sec_{0.0};
+  double prev_imu_raw_rel_sec_{0.0};
+  double core_time_sec_{0.0};
 
   // ---- smoothing (for visualization only) ----
   Eigen::Vector3d last_enu_{0,0,0};
@@ -399,6 +914,11 @@ private:
   // ---- GNSS cache for pose ----
   bool   last_gnss_valid_{false};
   double last_gnss_lat_rad_{0.0}, last_gnss_lon_rad_{0.0}, last_gnss_h_m_{0.0};
+
+  // ---- GNSS velocity derivation ----
+  bool   have_prev_gnss_for_vel_{false};
+  double prev_gnss_vel_lat_rad_{0.0}, prev_gnss_vel_lon_rad_{0.0}, prev_gnss_vel_h_{0.0};
+  double prev_gnss_vel_time_{0.0};
 
   // ---- 连贯轨迹相关（仅作追加基准） ----
   rclcpp::Time   last_path_stamp_;

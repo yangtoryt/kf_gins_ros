@@ -3,6 +3,12 @@
 # Windows下使用KF-GINS时，文件路径中不能有中文
 # When you run KF-GINS under Windows, there should be NO Chinese in the file path.
 
+# 滤波模式选择
+# Filter mode selection
+# 0: Standard EKF (equivalent to IEKF with max_iterations=1)
+# 1: IEKF (Iterated Extended Kalman Filter, max_iterations will be used)
+filter_mode: 1
+
 # IMU和GNSS数据文件路径
 # imudata and gnssdata filepath
 imupath: ""
@@ -83,3 +89,13 @@ imunoise:
 # 天线杆臂, IMU坐标系前右下方向
 # antenna lever, forward, right and down in the imu frame. [m]
 antlever: [ 0.136, -0.301, -0.184 ]
+
+# Sage-Husa 自适应观测噪声协方差 R（可选）
+# Sage-Husa adaptive measurement noise covariance R (optional)
+# 说明：对 GNSS 位置观测而言，R 单位为 [m^2]（在滤波内部为 NED 形式）。
+sage_husa:
+  enable: true
+  alpha: 0.95            # forgetting factor in (0,1)
+  diag_only: true        # true: only update diagonal of R
+  min_var_factor: 0.1    # variance floor = min_var_factor * R0 (per-axis)
+  min_var_abs: 0.0       # absolute variance floor [m^2], 0 means disabled

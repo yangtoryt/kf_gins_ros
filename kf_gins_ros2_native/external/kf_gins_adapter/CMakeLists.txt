@@ -4,6 +4,9 @@ project(kf_gins_adapter)
 
 # This adapter directly compiles KF-GINS core sources and exposes a small factory used by kf_gins_ros2_native.
 
+# Find Eigen3 - required by KF-GINS
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+
 add_library(kf_gins_core_adapter STATIC
   adapter.cpp
   # Pull in KF-GINS core sources (only two .cpp files are needed)
@@ -21,9 +24,11 @@ endif()
 # Headers
 target_include_directories(kf_gins_core_adapter PUBLIC
   ${KF_GINS_DIR}/src
-  ${KF_GINS_DIR}/ThirdParty/eigen-3.3.9
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Link Eigen3 library
+target_link_libraries(kf_gins_core_adapter PUBLIC Eigen3::Eigen)
 
 # fPIC to link into shared nodes
 set_target_properties(kf_gins_core_adapter PROPERTIES POSITION_INDEPENDENT_CODE ON)

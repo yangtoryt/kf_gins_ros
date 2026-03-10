@@ -1,0 +1,19 @@
+gps_relay_dropzones:
+  ros__parameters:
+    # 话题参数可以不写，使用 launch 时覆盖
+    in_fix_topic: /mavros/global_position/raw/fix
+    pose_topic: /mavros/local_position/pose
+    out_fix_topic: /gps/fix
+
+    # 掉线逻辑参数
+    drop_mode: status
+    hysteresis: 2.0
+    min_drop_duration: 1.0
+    covariance_on_drop: 1000000.0
+
+    # 四段遮挡区（中心±20 m 主路，长约 15 m，宽 16 m，高度不限）
+    zones:
+      - "-8.0,  8.0,  12.5, 27.5, -10, 250"    # 北
+      - "-8.0,  8.0, -27.5,-12.5, -10, 250"    # 南
+      - "12.5, 27.5, -8.0,  8.0, -10, 250"     # 东
+      - "-27.5,-12.5,-8.0,  8.0, -10, 250"     # 西

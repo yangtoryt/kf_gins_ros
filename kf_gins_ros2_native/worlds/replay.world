@@ -1,0 +1,39 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="default">
+    <!-- Gazebo <-> ROS2 state 插件 -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so"/>
+
+    <!-- 地面 & 太阳（这个你本来就有） -->
+    <include><uri>model://ground_plane</uri></include>
+    <include><uri>model://sun</uri></include>
+
+    <!-- 一个红色大盒子，当作建筑 -->
+    <model name="building1">
+      <static>true</static>
+      <!-- x y z roll pitch yaw -->
+      <pose>50 0 5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>10 10 10</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>10 10 10</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.8 0.3 0.3 1</ambient>
+            <diffuse>0.8 0.3 0.3 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

@@ -223,6 +223,32 @@ For more details on the algorithm, please refer to [惯性导航原理与GNSS/IN
 
 KF-GINS only supports initial alignment given all initial states currently. The initial states need to be set in the configuration file (kf-gins.yaml) before executing the program.
 
+### 2.4 Sage-Husa adaptive measurement noise (R)
+
+KF-GINS supports online estimation of the GNSS position measurement noise covariance $R$ using a Sage-Husa style innovation-based update. This is useful when the GNSS position STD is not reliable or changes over time.
+
+- The adaptive update is applied to the GNSS position measurement noise matrix (N/E/D).
+- For robustness, the default behavior is to update only the diagonal terms of $R$ and apply a variance floor.
+
+**Recommended defaults (safe and stable):**
+
+Add the following section to your YAML configuration (or keep the defaults):
+
+```yaml
+sage_husa:
+	enable: true
+	alpha: 0.95            # forgetting factor in (0,1); larger -> smoother/slower adaptation
+	diag_only: true        # keep R diagonal (recommended)
+	min_var_factor: 0.1    # per-axis variance floor = min_var_factor * R0
+	min_var_abs: 0.0       # absolute variance floor (unit^2), 0 means disabled
+```
+
+**Parameter notes:**
+
+- `alpha`: a typical range is 0.95~0.99. If you want faster adaptation, decrease it.
+- `diag_only`: set `false` only if you really want to estimate a full (correlated) $R$; it will be projected to SPD.
+- `min_var_factor` / `min_var_abs`: prevents $R$ from collapsing and the filter from becoming over-confident.
+
 
 ## 3 Datasets
 

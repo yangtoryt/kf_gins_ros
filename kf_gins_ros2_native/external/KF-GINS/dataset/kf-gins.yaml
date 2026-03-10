@@ -5,12 +5,12 @@
 
 # IMU和GNSS数据文件路径
 # imudata and gnssdata filepath
-imupath: "./dataset/Leador-A15.txt"
-gnsspath: "./dataset/GNSS-RTK.txt"
+imupath: "/home/yang/kf_gins_ws/src/kf_gins_ros2_native/external/KF-GINS/dataset/Leador-A15.txt"
+gnsspath: "/home/yang/kf_gins_ws/src/kf_gins_ros2_native/external/KF-GINS/dataset/GNSS-RTK.txt"
 
 # 输出文件夹路径
 # output folder path
-outputpath: "./dataset"
+outputpath: "/home/yang/kf_gins_ws/src/kf_gins_ros2_native/external/KF-GINS/dataset"
 
 # IMU文件列数 (只会用前7列IMU数据)
 # IMU data columns, only use the first seven columns

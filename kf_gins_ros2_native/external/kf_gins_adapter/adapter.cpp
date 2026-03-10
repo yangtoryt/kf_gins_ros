@@ -46,7 +46,12 @@ public:
       imu.dvel   = dvel_or_acc   * dt;
     }
 
-    engine_->addImuData(imu, /*compensate=*/true);
+    // 【关键修复】compensate 必须为 false！
+    // insPropagation() 内部已经会调用 imuCompensate(imucur)，
+    // 如果此处也 compensate=true，IMU 偏差/比例因子会被扣除/缩放两次，
+    // 导致一旦滤波器估计出非零 bias/scale，IMU 数据就被系统性破坏，
+    // 进而引发姿态发散 → 重力投影错误 → 位置/速度指数级发散。
+    engine_->addImuData(imu, /*compensate=*/false);
     engine_->newImuProcess();   // 推进 +（需要时）更新
 
     const auto st = engine_->getNavState();
@@ -63,14 +68,35 @@ public:
     gnss.time = t;
     // 注：GIEngine 用 BLH (rad, rad, m)
     gnss.blh << D2R(lat_deg), D2R(lon_deg), h_m;
-    // GIEngine 期望 NEU 标准差（米）；std_ned 第三项取绝对值再当 U
-    gnss.std << std_ned.x(), std_ned.y(), std::abs(std_ned.z()); // N, E, U (米)
+    // GIEngine 期望 NEU 标准差（米）；必须为正，否则协方差会数值崩坏。
+    const auto clamp_std = [](double v) {
+      const double a = std::abs(v);
+      // 【关键修复】旧值 0.5m 使仿真 GNSS std(0.1m) 被抬高 5 倍
+      // 降为 0.01m，仅防止 std=0 造成 R=0 数值崩坏
+      return std::max(0.01, a);
+    };
+    gnss.std << clamp_std(std_ned.x()), clamp_std(std_ned.y()), clamp_std(std_ned.z()); // N, E, U (m)
     // 上面一行如果你的 std 顺序就是 N,E,D，请改为：
     // gnss.std << std_ned.x(), std_ned.y(), std::abs(std_ned.z());
     gnss.isvalid = true;
 
     engine_->addGnssData(gnss);
     last_time_ = t;
+    return true;
+  }
+
+  // ★ GNSS 速度观测输入
+  bool ingestGnssVel(double t, double vN, double vE, double vD,
+                     const Eigen::Vector3d& std_vel) override
+  {
+    // GIEngine 使用 NED 速度
+    Eigen::Vector3d vel_ned(vN, vE, vD);
+    // clamp std: 最小 0.1 m/s，避免数值问题
+    Eigen::Vector3d std_clamped;
+    std_clamped << std::max(0.1, std::abs(std_vel.x())),
+                   std::max(0.1, std::abs(std_vel.y())),
+                   std::max(0.1, std::abs(std_vel.z()));
+    engine_->addVelData(vel_ned, std_clamped, t);
     return true;
   }
 
@@ -85,9 +111,22 @@ public:
                                 D2R(yaw_deg);
 
     // 合理的初始方差
+    // 【v5.0修复】ZUPT重置时无人机静止在地面，速度已知为~0。
+    // v4.0 将 vel_std 从 1.0 改为 100.0，目的是让 GNSS "拉得动"。
+    // 但 100.0 导致 P[V,V]=10000，GNSS 观测全被速度吸收，
+    // 姿态完全不可观，起飞后姿态漂移 → 重力投影错 → 发散到 217km。
+    // v4.0 的 "锁死" 问题根因是双重 IMU 补偿 bug（已在本版修复），
+    // 而非 vel_std 太小。现改为 5.0：足够宽松让滤波器适应初始误差，
+    // 又不至于完全屏蔽姿态可观性。
     options_.initstate_std.pos.setConstant(5.0);
-    options_.initstate_std.vel.setConstant(1.0);
+    options_.initstate_std.vel.setConstant(5.0);  // 从100.0改回5.0 【v5.0修复】
     options_.initstate_std.euler << D2R(5.0), D2R(5.0), D2R(10.0);
+
+    // 【关键修复】IMU 偏差初始 STD — 与 zeroOptions_ 保持一致
+    options_.initstate_std.imuerror.gyrbias  = Vector3d::Constant(D2R(500.0) / 3600.0);
+    options_.initstate_std.imuerror.accbias  = Vector3d::Constant(5000e-6 * 9.80665);
+    options_.initstate_std.imuerror.gyrscale = Vector3d::Constant(5000.0e-6);
+    options_.initstate_std.imuerror.accscale = Vector3d::Constant(5000.0e-6);
 
     engine_.reset(new GIEngine(options_));
     // 让引擎后续在 IMU 推进中根据 GNSS/内逻辑进入工作
@@ -108,7 +147,15 @@ private:
     opt.initstate_std.pos.setConstant(100.0);
     opt.initstate_std.vel.setConstant(10.0);
     opt.initstate_std.euler.setConstant(D2R(30.0));
-
+    // 【关键修复】IMU 偏差/比例因子的初始 STD
+    // 旧代码未设置这些值 → 默认为 0 → P[BG]=P[BA]=P[SG]=P[SA]=0
+    // → 滤波器认为 IMU 偏差"完美已知为零"，永远不更新
+    // → 陀螺偏差无法估计 → yaw 不可控制地漂移
+    // 仿真 MEMS-IMU 的合理初始不确定度：
+    opt.initstate_std.imuerror.gyrbias  = Vector3d::Constant(D2R(500.0) / 3600.0);  // 500 deg/h
+    opt.initstate_std.imuerror.accbias  = Vector3d::Constant(5000e-6 * 9.80665);    // 5000 mGal
+    opt.initstate_std.imuerror.gyrscale = Vector3d::Constant(5000.0e-6);             // 5000 ppm
+    opt.initstate_std.imuerror.accscale = Vector3d::Constant(5000.0e-6);             // 5000 ppm
     // 简单默认 IMU 噪声（可从 YAML/参数替换以对齐原仓库）
     opt.imunoise.gyr_arw      = Vector3d::Constant(D2R(0.2) / std::sqrt(3600.0));
     opt.imunoise.acc_vrw      = Vector3d::Constant(0.2 / std::sqrt(3600.0));
@@ -149,6 +196,7 @@ std::unique_ptr<KFCore> create_kf_core_adapter(const AdapterConfig& cfg) {
 }
 std::unique_ptr<KFCore> create_kf_core() {
   AdapterConfig cfg;
+  cfg.imu_is_delta = false;
   return create_kf_core_adapter(cfg);
 }
 

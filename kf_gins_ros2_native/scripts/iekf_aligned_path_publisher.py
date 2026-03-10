@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""
+IEKF 对齐轨迹发布器
+将 /iekf/state_aligned/position (Vector3Stamped) 转换为 /iekf/path_aligned (Path)
+"""
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSHistoryPolicy, QoSReliabilityPolicy
+from geometry_msgs.msg import Vector3Stamped, PoseStamped
+from nav_msgs.msg import Path
+import math
+from mavros_msgs.msg import State
+
+
+class IEKFAlignedPathPublisher(Node):
+    def __init__(self):
+        super().__init__("iekf_aligned_path_publisher")
+
+        self.input_topic = self.declare_parameter(
+            "input_topic", "/iekf/state_aligned/position"
+        ).value
+        self.output_topic = self.declare_parameter(
+            "output_topic", "/iekf/path_aligned"
+        ).value
+        self.frame_id = self.declare_parameter("frame_id", "map").value
+        self.max_path_length = int(
+            self.declare_parameter("max_path_length", 20000).value
+        )
+        self.min_distance = float(
+            self.declare_parameter("min_distance", 0.05).value
+        )
+        self.require_armed = bool(
+            self.declare_parameter("require_armed", True).value
+        )
+        self.clear_on_arm_transition = bool(
+            self.declare_parameter("clear_on_arm_transition", True).value
+        )
+        self.mavros_state_topic = str(
+            self.declare_parameter("mavros_state_topic", "/mavros/state").value
+        )
+
+        qos_sub = QoSProfile(
+            depth=100,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+        )
+        qos_pub = QoSProfile(
+            depth=10,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
+
+        self.sub = self.create_subscription(
+            Vector3Stamped,
+            self.input_topic,
+            self.vec_callback,
+            qos_sub,
+        )
+        self.pub = self.create_publisher(Path, self.output_topic, qos_pub)
+
+        self.path = Path()
+        self.path.header.frame_id = self.frame_id
+        self.last_pos = None
+        self.mavros_armed = False
+        self.have_mavros_state = False
+
+        if self.require_armed:
+            qos_state = QoSProfile(
+                depth=10,
+                history=QoSHistoryPolicy.KEEP_LAST,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+            )
+            self.state_sub = self.create_subscription(
+                State,
+                self.mavros_state_topic,
+                self._on_state,
+                qos_state,
+            )
+
+        self.get_logger().info("IEKF Aligned Path Publisher 已启动")
+        self.get_logger().info(f"订阅话题: {self.input_topic}")
+        self.get_logger().info(f"发布话题: {self.output_topic}")
+
+    def _on_state(self, msg: State):
+        prev = self.mavros_armed
+        self.mavros_armed = bool(msg.armed)
+        self.have_mavros_state = True
+        if self.clear_on_arm_transition and prev != self.mavros_armed:
+            self.path.poses.clear()
+            self.last_pos = None
+            self.path.header.stamp = self.get_clock().now().to_msg()
+            self.pub.publish(self.path)
+
+    def vec_callback(self, msg: Vector3Stamped):
+        if self.require_armed:
+            if self.have_mavros_state and not self.mavros_armed:
+                return
+        pos = msg.vector
+        if self.last_pos:
+            dx = pos.x - self.last_pos[0]
+            dy = pos.y - self.last_pos[1]
+            dz = pos.z - self.last_pos[2]
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if dist < self.min_distance:
+                return
+
+        self.last_pos = (pos.x, pos.y, pos.z)
+
+        pose = PoseStamped()
+        pose.header.stamp = msg.header.stamp
+        pose.header.frame_id = self.frame_id
+        pose.pose.position.x = float(pos.x)
+        pose.pose.position.y = float(pos.y)
+        pose.pose.position.z = float(pos.z)
+        pose.pose.orientation.w = 1.0
+
+        self.path.header.stamp = msg.header.stamp
+        self.path.header.frame_id = self.frame_id
+        self.path.poses.append(pose)
+
+        if len(self.path.poses) > self.max_path_length:
+            self.path.poses.pop(0)
+
+        self.pub.publish(self.path)
+
+
+def main():
+    rclpy.init()
+    node = IEKFAlignedPathPublisher()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

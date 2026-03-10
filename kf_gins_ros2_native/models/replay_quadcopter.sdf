@@ -1,0 +1,181 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="replay_quadcopter">
+    <!-- 需要被 SetEntityState 移动，所以不能 static -->
+    <static>false</static>
+    <pose>0 0 0 0 0 0</pose>
+
+    <link name="base_link">
+      <pose>0 0 0 0 0 0</pose>
+
+      <!-- 物理属性尽量“安静”一些 -->
+      <inertial>
+        <mass>0.5</mass>
+        <inertia>
+          <ixx>0.01</ixx>
+          <iyy>0.01</iyy>
+          <izz>0.02</izz>
+          <ixy>0.0</ixy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+        </inertia>
+      </inertial>
+      <gravity>0</gravity>
+      <self_collide>false</self_collide>
+      <linear_damping>0.8</linear_damping>
+      <angular_damping>0.8</angular_damping>
+
+      <!-- 1. 机身 -->
+      <collision name="body_collision">
+        <geometry>
+          <box>
+            <size>0.25 0.25 0.05</size>
+          </box>
+        </geometry>
+      </collision>
+
+      <visual name="body_visual">
+        <geometry>
+          <box>
+            <size>0.25 0.25 0.05</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.3 0.3 0.3 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- 2. 前后左右四个机臂（十字） -->
+      <visual name="arm_x">
+        <geometry>
+          <box>
+            <size>0.5 0.03 0.02</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.15 0.15 0.15 1</ambient>
+          <diffuse>0.2 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+
+      <visual name="arm_y">
+        <geometry>
+          <box>
+            <size>0.03 0.5 0.02</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.15 0.15 0.15 1</ambient>
+          <diffuse>0.2 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- 3. 四个电机+桨盘（颜色区分方向） -->
+      <!-- front (x+), green -->
+      <visual name="motor_front">
+        <pose>0.25 0 0.03 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.025</radius>
+            <length>0.03</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>0 1 0 1</diffuse>
+        </material>
+      </visual>
+      <visual name="prop_front">
+        <pose>0.25 0 0.045 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.12</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>0 1 0 0.7</diffuse>
+        </material>
+      </visual>
+
+      <!-- right (y-), red -->
+      <visual name="motor_right">
+        <pose>0 -0.25 0.03 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.025</radius>
+            <length>0.03</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>1 0 0 1</diffuse>
+        </material>
+      </visual>
+      <visual name="prop_right">
+        <pose>0 -0.25 0.045 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.12</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>1 0 0 0.7</diffuse>
+        </material>
+      </visual>
+
+      <!-- back (x-), blue -->
+      <visual name="motor_back">
+        <pose>-0.25 0 0.03 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.025</radius>
+            <length>0.03</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>0 0 1 1</diffuse>
+        </material>
+      </visual>
+      <visual name="prop_back">
+        <pose>-0.25 0 0.045 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.12</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>0 0 1 0.7</diffuse>
+        </material>
+      </visual>
+
+      <!-- left (y+), yellow -->
+      <visual name="motor_left">
+        <pose>0 0.25 0.03 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.025</radius>
+            <length>0.03</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>1 1 0 1</diffuse>
+        </material>
+      </visual>
+      <visual name="prop_left">
+        <pose>0 0.25 0.045 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.12</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>1 1 0 0.7</diffuse>
+        </material>
+      </visual>
+
+    </link>
+  </model>
+</sdf>

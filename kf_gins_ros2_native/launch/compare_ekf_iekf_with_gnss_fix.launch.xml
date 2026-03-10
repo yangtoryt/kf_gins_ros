@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- 【IEKF GNSS协方差自适应修复】v3.0 启动文件 -->
+  <!-- 
+    用法:
+    ros2 launch kf_gins_ros2_native compare_ekf_iekf_with_gnss_fix.launch.py
+    
+    或带参数:
+    ros2 launch kf_gins_ros2_native compare_ekf_iekf_with_gnss_fix.launch.py \
+      use_sim_time:=true \
+      use_sim_gnss_std:=true \
+      sim_gnss_std_h_m:=0.1 \
+      sim_gnss_std_u_m:=0.2
+  -->
+
+  <arg name="use_sim_time" default="true" description="Use simulation time (/clock)"/>
+  <arg name="use_sim_gnss_std" default="true" description="Enable simulation-specific GNSS std (0.1m instead of 5.0m)"/>
+  <arg name="sim_gnss_std_h_m" default="0.1" description="Simulation GNSS horizontal std (meters)"/>
+  <arg name="sim_gnss_std_u_m" default="0.2" description="Simulation GNSS vertical std (meters)"/>
+  <arg name="scenario" default="city_dense" description="Gazebo world scenario"/>
+  <arg name="record_bag" default="true" description="Record rosbag"/>
+  <arg name="start_rviz" default="true" description="Start RViz"/>
+  <arg name="enable_real_time_comparison" default="true" description="Enable real-time EKF2 vs IEKF comparison"/>
+  <arg name="enable_gps_dropzones" default="false" description="Enable GNSS dropzones (simulated GNSS outages)"/>
+
+  <!-- 信息提示 -->
+  <node pkg="ros2" exec="ros2" args="launch kf_gins_ros2_native compare_ekf_iekf.launch.py" launch-prefix="echo '【IEKF GNSS协方差自适应修复 v3.0】" output="screen"/>
+  
+  <!-- 实际启动compare_ekf_iekf.launch.py，传递所有参数 -->
+  <include file="$(find-pkg-share kf_gins_ros2_native)/launch/compare_ekf_iekf.launch.py">
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="use_sim_gnss_std" value="$(var use_sim_gnss_std)"/>
+    <arg name="sim_gnss_std_h_m" value="$(var sim_gnss_std_h_m)"/>
+    <arg name="sim_gnss_std_u_m" value="$(var sim_gnss_std_u_m)"/>
+    <arg name="scenario" value="$(var scenario)"/>
+    <arg name="record_bag" value="$(var record_bag)"/>
+    <arg name="start_rviz" value="$(var start_rviz)"/>
+    <arg name="enable_real_time_comparison" value="$(var enable_real_time_comparison)"/>
+    <arg name="enable_gps_dropzones" value="$(var enable_gps_dropzones)"/>
+  </include>
+
+</launch>

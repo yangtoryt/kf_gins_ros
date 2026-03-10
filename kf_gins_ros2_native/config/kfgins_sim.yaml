@@ -1,0 +1,26 @@
+kf_gins_native:
+  ros__parameters:
+    use_sim_time: true
+    imu_topic: /imu/data
+    gnss_topic: /gps/fix
+    imu_is_delta: false
+
+    # 坐标系命名（让发布的话题一致）
+    map_frame: map
+    odom_frame: map
+    base_frame: base_link
+
+    # 轨迹与发布节流
+    path_publish_rate_hz: 5.0
+    pose_decimation: 5
+    max_path_points: 20000
+    min_dist_m: 1.0
+
+    # 对齐/跳变门限（适合你的场景）
+    use_gnss_llh_for_pose: true
+    start_after_gnss_sec: 1.0
+    publish_after_sec: 1.0
+    align_gate_m: 5.0
+    max_jump_m: 30.0
+    reset_gate_m: 8.0
+    v_limit_mps: 20.0

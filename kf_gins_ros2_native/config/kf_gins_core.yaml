@@ -1,0 +1,40 @@
+kf_gins_node:
+  ros__parameters:
+    use_sim_time: false
+
+    map_frame: map
+    odom_frame: odom
+    base_frame: base_link
+
+    imu_topic: /imu/data         # 由 imu_flu_to_frd.py 转换输出
+    gnss_topic: /gps/fix         # 由 gnss_relay.py 转发输出（reliable）
+
+    imu_is_delta: false
+    # 对比 IEKF vs EKF2 时建议关闭：否则 /kf_gins/odom 的位置基本就是 GNSS 测量，
+    # 会导致“转弯像折线/不真实”（GNSS 更新率低 + RViz Path 直线连接采样点）。
+    # 关闭后仍会在“核心LLH未与GNSS对齐”阶段临时用 GNSS 做可视化，避免起步发散。
+    use_gnss_llh_for_pose: false
+
+    # Path 采样：默认加密一些，转弯更接近真实轨迹
+    pose_decimation: 2
+    path_publish_rate_hz: 10.0
+    min_dist_m: 0.05
+    max_path_points: 20000
+
+    # IMU 时间戳抖动（仿真/桥接）容忍度；过小会导致大量“dt jump”而只剩 GNSS 更新
+    max_imu_dt_sec: 0.50
+
+    align_gate_m: 300.0
+    reset_gate_m: 50.0
+    v_limit_mps: 120.0
+
+    start_after_gnss_sec: 1.0
+    publish_after_sec: 2.0
+
+    qos_overrides:
+      /tf:
+        publisher: {history: keep_last, depth: 100, reliability: reliable, durability: volatile}
+      /tf_static:
+        publisher: {history: keep_last, depth: 1, reliability: reliable}
+      /clock:
+        subscription: {history: keep_last, depth: 1, reliability: best_effort, durability: volatile}

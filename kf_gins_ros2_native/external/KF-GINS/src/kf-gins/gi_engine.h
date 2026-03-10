@@ -24,6 +24,10 @@
 #define GI_ENGINE_H
 
 #include <Eigen/Dense>
+#include <Eigen/Eigenvalues>
+#include <functional>
+#include <iomanip>
+#include <iostream>
 #include <vector>
 
 #include "common/types.h"
@@ -103,6 +107,20 @@ public:
         imu2.dtheta = imu2.dtheta - midimu.dtheta;
         imu2.dvel   = imu2.dvel - midimu.dvel;
         imu2.dt     = imu2.dt - midimu.dt;
+    }
+
+    /**
+     * @brief 添加GNSS速度观测数据
+     *        add GNSS velocity observation
+     * @param [in] vel_ned  NED速度 (m/s)
+     * @param [in] vel_std  速度标准差 (m/s)
+     * @param [in] time     观测时间
+     * */
+    void addVelData(const Eigen::Vector3d& vel_ned, const Eigen::Vector3d& vel_std, double time) {
+        vel_obs_      = vel_ned;
+        vel_obs_std_  = vel_std;
+        vel_obs_time_ = time;
+        has_vel_obs_  = true;
     }
 
     /**
@@ -191,19 +209,28 @@ private:
      * @param [in,out] Qd  传播噪声矩阵
      *                     propagation noise matrix
      * */
-    void EKFPredict(Eigen::MatrixXd &Phi, Eigen::MatrixXd &Qd);
+	void EKFPredict(Eigen::MatrixXd &Phi, Eigen::MatrixXd &Qd);
+
+	/**
+	 * @brief 误差状态IEKF更新 (Iterated Error-State EKF)
+	 *        Update using iterated linearization with fixed prior covariance.
+	 * @param [in] meas_model  给定线性化点时，输出 dz 和 H 的观测模型
+	 *                         measurement model (outputs dz and H at a given linearization point)
+	 * @param [in] R           观测噪声阵 / measurement noise matrix
+	 * */
+	void IEKFUpdate(
+	    const std::function<void(const PVA &, const ImuError &, Eigen::MatrixXd &, Eigen::MatrixXd &)> &meas_model,
+	    Eigen::MatrixXd &R, const Eigen::MatrixXd &P0);
 
     /**
-     * @brief Kalman 更新
-     *        Kalman Filter Update process
-     * @param [in] dz 观测新息
-     *                measurement innovation
-     * @param [in] H  观测矩阵
-     *                measurement matrix
-     * @param [in] R  观测噪声阵
-     *                measurement noise matrix
+     * @brief Sage-Husa 自适应噪声估计算法 (更新 R)
+     *        Sage-Husa adaptive noise estimation (updates R)
+     * @param [in] dz     观测残差 (innovation)
+     * @param [in] H      观测矩阵
+     * @param [in,out] R  观测噪声阵
+     * @param [in] P0     先验误差协方差
      * */
-    void EKFUpdate(Eigen::MatrixXd &dz, Eigen::MatrixXd &H, Eigen::MatrixXd &R);
+    void adaptiveREstimation(const Eigen::VectorXd &dz, const Eigen::MatrixXd &H, Eigen::MatrixXd &R, const Eigen::MatrixXd &P0);
 
     /**
      * @brief 反馈误差状态到当前状态
@@ -217,11 +244,37 @@ private:
      * */
     void checkCov() {
 
+        bool bad_diag = false;
         for (int i = 0; i < RANK; i++) {
-            if (Cov_(i, i) < 0) {
-                std::cout << "Covariance is negative at " << std::setprecision(10) << timestamp_ << " !" << std::endl;
-                std::exit(EXIT_FAILURE);
+            if (!std::isfinite(Cov_(i, i)) || Cov_(i, i) < 0) {
+                bad_diag = true;
+                break;
             }
+        }
+        if (!bad_diag) return;
+
+        // Numerical issues can make Cov_ lose SPD, especially under long GNSS outages / timing glitches.
+        // Instead of exiting, project Cov_ back to the nearest SPD matrix (clamp eigenvalues).
+        const double eps = 1e-12;
+
+        Cov_ = 0.5 * (Cov_ + Cov_.transpose());
+        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Cov_);
+        if (es.info() != Eigen::Success) {
+            std::cout << "Covariance is invalid at " << std::setprecision(10) << timestamp_
+                      << " (eigen solve failed). Resetting covariance to identity." << std::endl;
+            Cov_.setIdentity();
+            Cov_ *= 1.0;
+            return;
+        }
+
+        Eigen::VectorXd eval = es.eigenvalues();
+        const double min_eig = eval.minCoeff();
+        if (!std::isfinite(min_eig) || min_eig <= eps) {
+            std::cout << "Covariance is not SPD at " << std::setprecision(10) << timestamp_
+                      << " (min_eig=" << min_eig << "). Projecting to SPD." << std::endl;
+            eval = eval.cwiseMax(eps);
+            Cov_ = es.eigenvectors() * eval.asDiagonal() * es.eigenvectors().transpose();
+            Cov_ = 0.5 * (Cov_ + Cov_.transpose());
         }
     }
 
@@ -248,17 +301,49 @@ private:
 
     // Kalman滤波相关
     // ekf variables
-    Eigen::MatrixXd Cov_;
-    Eigen::MatrixXd Qc_;
-    Eigen::MatrixXd dx_;
+	Eigen::MatrixXd Cov_;
+	Eigen::MatrixXd Qc_;
+	Eigen::MatrixXd dx_;
+	    
+	// IEKF (Iterated Extended Kalman Filter) 相关变量
+	// IEKF parameters and temporary variables
+	int iekf_max_iterations_{5};              // 最大迭代次数 / max iterations
+	double iekf_convergence_threshold_{1e-6}; // 收敛阈值 / convergence threshold
+	
+	void applyErrorState(const Eigen::MatrixXd &dx, PVA &pva, ImuError &imuerror) const;
 
-    const int RANK      = 21;
-    const int NOISERANK = 18;
+	const int RANK      = 21;
+	const int NOISERANK = 18;
+
+    /**
+     * @brief 使用GNSS速度观测更新系统状态（线性观测，标准EKF更新）
+     *        update state using GNSS velocity observation
+     * */
+    void gnssVelUpdate();
+
+    // GNSS 速度观测数据
+    // GNSS velocity observation data
+    bool has_vel_obs_{false};
+    Eigen::Vector3d vel_obs_{0, 0, 0};       // NED velocity (m/s)
+    Eigen::Vector3d vel_obs_std_{1, 1, 1};   // velocity std (m/s)
+    double vel_obs_time_{0};
+
+    // Sage-Husa 自适应相关变量（用于在线更新 R）
+    bool use_sage_husa_{true};
+    double sage_husa_alpha_{0.95};
+    bool sage_husa_diag_only_{true};
+    double sage_husa_min_var_factor_{0.1};
+    double sage_husa_min_var_abs_{0.0};
+    std::uint64_t sage_husa_k_{0};
+    Eigen::MatrixXd R_gnsspos_;       // GNSS 观测噪声阵（持久化）/ GNSS noise matrix (persisted)
+    Eigen::MatrixXd R_gnsspos_init_;  // 初始 R (用于下限) / initial R floor reference
 
     // 状态ID和噪声ID
     // state ID and noise ID
     enum StateID { P_ID = 0, V_ID = 3, PHI_ID = 6, BG_ID = 9, BA_ID = 12, SG_ID = 15, SA_ID = 18 };
     enum NoiseID { VRW_ID = 0, ARW_ID = 3, BGSTD_ID = 6, BASTD_ID = 9, SGSTD_ID = 12, SASTD_ID = 15 };
+
+
 };
 
 #endif // GI_ENGINE_H
