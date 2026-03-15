@@ -103,10 +103,39 @@ public:
     disarmed_yaw_lock_enable_ = this->declare_parameter<bool>("disarmed_yaw_lock_enable", true);
     disarmed_yaw_lock_interval_sec_ = this->declare_parameter<double>("disarmed_yaw_lock_interval_sec", 1.0);
     disarmed_yaw_lock_max_yaw_err_deg_ = this->declare_parameter<double>("disarmed_yaw_lock_max_yaw_err_deg", 5.0);
+    force_zero_antlever_ = this->declare_parameter<bool>("force_zero_antlever", true);
+    enable_gnss_velocity_update_ = this->declare_parameter<bool>("enable_gnss_velocity_update", false);
+    gnss_vel_std_floor_h_mps_ = this->declare_parameter<double>("gnss_vel_std_floor_h_mps", 0.5);
+    gnss_vel_std_floor_u_mps_ = this->declare_parameter<double>("gnss_vel_std_floor_u_mps", 1.0);
+    use_online_reset_covariance_ = this->declare_parameter<bool>("use_online_reset_covariance", true);
+    reset_pos_std_m_ = this->declare_parameter<double>("reset_pos_std_m", 5.0);
+    reset_vel_std_mps_ = this->declare_parameter<double>("reset_vel_std_mps", 5.0);
+    reset_roll_pitch_std_deg_ = this->declare_parameter<double>("reset_roll_pitch_std_deg", 5.0);
+    reset_yaw_std_deg_ = this->declare_parameter<double>("reset_yaw_std_deg", 10.0);
+    enable_heading_update_ = this->declare_parameter<bool>("enable_heading_update", true);
+    heading_update_std_deg_ = this->declare_parameter<double>("heading_update_std_deg", 3.0);
+    heading_update_max_rate_hz_ = this->declare_parameter<double>("heading_update_max_rate_hz", 10.0);
+    heading_update_max_age_sec_ = this->declare_parameter<double>("heading_update_max_age_sec", 0.5);
+    heading_update_low_speed_thresh_mps_ =
+      this->declare_parameter<double>("heading_update_low_speed_thresh_mps", 2.0);
+    heading_update_when_armed_ = this->declare_parameter<bool>("heading_update_when_armed", false);
+    heading_update_armed_max_speed_thresh_mps_ =
+      this->declare_parameter<double>("heading_update_armed_max_speed_thresh_mps", 6.0);
+    heading_update_when_disarmed_ = this->declare_parameter<bool>("heading_update_when_disarmed", true);
+    heading_update_when_armed_low_speed_ =
+      this->declare_parameter<bool>("heading_update_when_armed_low_speed", true);
+    heading_update_when_gnss_no_fix_ =
+      this->declare_parameter<bool>("heading_update_when_gnss_no_fix", true);
 
     // ---- core ----
     kfcore::AdapterConfig core_cfg;
     core_cfg.imu_is_delta = imu_is_delta_;
+    core_cfg.force_zero_antlever = force_zero_antlever_;
+    core_cfg.use_online_reset_covariance = use_online_reset_covariance_;
+    core_cfg.reset_pos_std_m = reset_pos_std_m_;
+    core_cfg.reset_vel_std_mps = reset_vel_std_mps_;
+    core_cfg.reset_roll_pitch_std_deg = reset_roll_pitch_std_deg_;
+    core_cfg.reset_yaw_std_deg = reset_yaw_std_deg_;
     core_ = kfcore::create_kf_core_adapter(core_cfg);
     if (!core_) throw std::runtime_error("no core");
     if (!config_path_.empty())
@@ -141,7 +170,10 @@ public:
     gnss_sub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
       gnss_topic_, gnss_qos, std::bind(&KFGinsNativeNode::gnssCb, this, _1));
 
-    auto state_qos = rclcpp::QoS(rclcpp::KeepLast(10)).reliable().durability_volatile();
+    // MAVROS /state 在当前链路中与其它节点更兼容的 QoS 是 BEST_EFFORT。
+    // 之前这里用 RELIABLE 时，kf_gins_node 很可能完全收不到 armed 翻转，
+    // 导致飞行阶段仍执行 disarmed 逻辑（ZUPT / GNSS pose fallback）。
+    auto state_qos = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort().durability_volatile();
     mavros_state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
       mavros_state_topic_, state_qos, std::bind(&KFGinsNativeNode::mavrosStateCb, this, _1));
 
@@ -167,6 +199,7 @@ public:
         while (yaw_ned < -M_PI) yaw_ned += 2.0 * M_PI;
         mavros_heading_ned_deg_ = yaw_ned * 180.0 / M_PI;
         have_mavros_heading_ = true;
+        last_mavros_heading_rx_time_sec_ = this->now().seconds();
       });
 
     tf_broadcaster_     = std::make_shared<tf2_ros::TransformBroadcaster>(this);
@@ -205,6 +238,7 @@ private:
 
     if (prev_armed != mavros_armed_) {
       last_disarmed_yaw_lock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+      last_heading_update_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     }
 
     if (clear_path_on_arm_transition_ && prev_armed != mavros_armed_) {
@@ -270,6 +304,7 @@ private:
     last_gnss_time_sec_ = -std::numeric_limits<double>::infinity();
     have_prev_gnss_for_vel_ = false;
     last_zupt_reset_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    last_heading_update_time_sec_ = std::numeric_limits<double>::quiet_NaN();
 
     clearPath_("disarmed yaw lock");
 
@@ -301,6 +336,7 @@ private:
     have_origin_ = false;
     core_initialized_ = false;
     have_prev_gnss_for_vel_ = false;
+    last_heading_update_time_sec_ = std::numeric_limits<double>::quiet_NaN();
 
     if (last_gnss_valid_) {
       const double init_yaw = getInitialYawDeg_();
@@ -312,6 +348,53 @@ private:
       RCLCPP_WARN(get_logger(), "Core reset to last GNSS fix. yaw=%.1f deg (mavros=%s)",
                   init_yaw, have_mavros_heading_ ? "yes" : "no");
     }
+  }
+
+  void maybeApplyHeadingUpdate_(double t_sec)
+  {
+    if (!enable_heading_update_ || !core_initialized_ || !have_mavros_heading_) return;
+
+    const double now_sec = now().seconds();
+    if (!std::isfinite(last_mavros_heading_rx_time_sec_) ||
+        (now_sec - last_mavros_heading_rx_time_sec_) > std::max(0.05, heading_update_max_age_sec_)) {
+      return;
+    }
+
+    const double min_period_sec =
+      heading_update_max_rate_hz_ > 0.0 ? 1.0 / heading_update_max_rate_hz_ : 0.0;
+    if (std::isfinite(last_heading_update_time_sec_) &&
+        (now_sec - last_heading_update_time_sec_) < min_period_sec) {
+      return;
+    }
+
+    const auto st = core_->current();
+    const double speed_mps = std::sqrt(st.vN * st.vN + st.vE * st.vE + st.vD * st.vD);
+
+    bool apply_heading = false;
+    if (heading_update_when_disarmed_ && !mavros_armed_) {
+      apply_heading = true;
+    }
+    if (heading_update_when_armed_low_speed_ && mavros_armed_ &&
+        speed_mps <= std::max(0.0, heading_update_low_speed_thresh_mps_)) {
+      apply_heading = true;
+    }
+    if (heading_update_when_armed_ && mavros_armed_) {
+      const double max_speed = heading_update_armed_max_speed_thresh_mps_;
+      if (max_speed <= 0.0 || speed_mps <= max_speed) {
+        apply_heading = true;
+      }
+    }
+    if (heading_update_when_gnss_no_fix_ && !last_gnss_has_fix_) {
+      apply_heading = true;
+    }
+    if (!apply_heading) return;
+
+    if (!core_->ingestHeading(t_sec, mavros_heading_ned_deg_, heading_update_std_deg_)) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "core_->ingestHeading() failed");
+      return;
+    }
+
+    last_heading_update_time_sec_ = now_sec;
   }
 
   // ------------------------- Callbacks -------------------------
@@ -326,6 +409,27 @@ private:
       have_prev_imu_ = true;
       have_raw_time_zero_ = false;
       prev_imu_raw_rel_sec_ = 0.0;
+      core_time_sec_ = 0.0;
+      last_core_time_ = -std::numeric_limits<double>::infinity();
+      return;
+    }
+
+    // 在线仿真中，core 的有效初值来自第一次 GNSS reset，而不是 YAML 里的离线初值。
+    // 在首次 GNSS 之前只建立 IMU 时间基，不推进 mechanization，避免错误初值导致协方差炸裂。
+    if (!core_initialized_) {
+      const bool use_raw_time_for_dt = use_node_time_for_core_ || !use_steady_time_for_imu_dt_;
+      if (use_raw_time_for_dt) {
+        if (!have_raw_time_zero_) {
+          raw_time_zero_sec_ = prev_imu_time_;
+          have_raw_time_zero_ = true;
+          prev_imu_raw_rel_sec_ = 0.0;
+        }
+        const double raw_rel = raw_t - raw_time_zero_sec_;
+        prev_imu_raw_rel_sec_ = raw_rel;
+        prev_imu_time_ = raw_t;
+      } else {
+        prev_imu_steady_time_ = steady_now;
+      }
       core_time_sec_ = 0.0;
       last_core_time_ = -std::numeric_limits<double>::infinity();
       return;
@@ -404,6 +508,7 @@ private:
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "core_->ingestImu() failed");
       return;
     }
+    maybeApplyHeadingUpdate_(t);
     last_core_time_ = t;
     publishState();
   }
@@ -412,12 +517,15 @@ private:
   {
     double t_raw = use_node_time_for_core_ ? rawTimeSecNow_() : rawTimeSecFromMsg_(msg->header.stamp);
     double t = t_raw;
+    bool reset_this_gnss = false;
 
     // 支持 dropzones：当上游发布 NO_FIX（例如 GPS 遮挡段），这里直接跳过 GNSS 更新
     if (msg->status.status == sensor_msgs::msg::NavSatStatus::STATUS_NO_FIX) {
+      last_gnss_has_fix_ = false;
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "GNSS status=NO_FIX, skipping update.");
       return;
     }
+    last_gnss_has_fix_ = true;
 
     if (!std::isfinite(msg->latitude) || !std::isfinite(msg->longitude) || !std::isfinite(msg->altitude)) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "GNSS contains NaN/Inf, skipping.");
@@ -444,6 +552,8 @@ private:
       const double init_yaw = getInitialYawDeg_();
       (void)core_->reset(msg->latitude, msg->longitude, msg->altitude, init_yaw);
       core_initialized_ = true;
+      reset_this_gnss = true;
+      last_disarmed_yaw_lock_time_sec_ = now().seconds();
       RCLCPP_INFO(this->get_logger(), "Core reset by first GNSS fix. yaw=%.1f deg (mavros=%s)",
                   init_yaw, have_mavros_heading_ ? "yes" : "no");
     }
@@ -504,7 +614,8 @@ private:
     last_gnss_h_m_     = msg->altitude;
     last_gnss_valid_   = true;
 
-    if (disarmed_yaw_lock_enable_ && !mavros_armed_ && core_initialized_ && have_mavros_heading_) {
+    if (!reset_this_gnss &&
+        disarmed_yaw_lock_enable_ && !mavros_armed_ && core_initialized_ && have_mavros_heading_) {
       const double now_sec = now().seconds();
       const bool interval_elapsed =
         !std::isfinite(last_disarmed_yaw_lock_time_sec_) ||
@@ -558,7 +669,7 @@ private:
     // 这是解决姿态（尤其 yaw）不可观的关键：速度观测让 H 矩阵覆盖了 V 状态，
     // 通过 F 矩阵中的 V↔PHI 耦合，间接使姿态可观。
     // 当 ZUPT 已应用时跳过（ZUPT 的 0.05 m/s std 比位置差分的 ~0.7 m/s 更紧）
-    if (!zupt_applied && have_prev_gnss_for_vel_) {
+    if (enable_gnss_velocity_update_ && !zupt_applied && have_prev_gnss_for_vel_) {
       const double dt_gnss = t - prev_gnss_vel_time_;
       if (std::isfinite(dt_gnss) && dt_gnss > 0.05 && dt_gnss < 5.0) {
         const double lat_avg = (msg->latitude * M_PI/180.0 + prev_gnss_vel_lat_rad_) * 0.5;
@@ -576,8 +687,8 @@ private:
           // 位置差分速度的 std ≈ sqrt(2) * pos_std / dt_gnss
           // 【关键修复】仿真模式下降低 vel_std 下限：
           // 旧代码 max(0.5, 0.14) = 0.5 m/s，R 膨胀 12.6× → yaw 可观性严重不足
-          const double vel_floor_h = use_sim_gnss_std_ ? 0.05 : 0.5;
-          const double vel_floor_u = use_sim_gnss_std_ ? 0.1  : 1.0;
+          const double vel_floor_h = std::max(0.05, gnss_vel_std_floor_h_mps_);
+          const double vel_floor_u = std::max(0.1, gnss_vel_std_floor_u_mps_);
           const double vel_std_h = std::max(vel_floor_h, std::sqrt(2.0) * std_ned.x() / dt_gnss);
           const double vel_std_u = std::max(vel_floor_u, std::sqrt(2.0) * std_ned.z() / dt_gnss);
           Eigen::Vector3d vel_std(vel_std_h, vel_std_h, vel_std_u);
@@ -842,6 +953,7 @@ private:
   // 【关键修复】MAVROS 航向 (来自 EKF2 磁力计融合)
   bool have_mavros_heading_{false};
   double mavros_heading_ned_deg_{0.0};
+  double last_mavros_heading_rx_time_sec_{std::numeric_limits<double>::quiet_NaN()};
 
   // 【修复】零速度更新 (ZUPT) - 无人机未启动时
   bool use_zero_velocity_update_when_disarmed_{true};
@@ -851,6 +963,27 @@ private:
   bool disarmed_yaw_lock_enable_{true};
   double disarmed_yaw_lock_interval_sec_{1.0};
   double disarmed_yaw_lock_max_yaw_err_deg_{5.0};
+  bool force_zero_antlever_{true};
+  bool enable_gnss_velocity_update_{false};
+  double gnss_vel_std_floor_h_mps_{0.5};
+  double gnss_vel_std_floor_u_mps_{1.0};
+  bool use_online_reset_covariance_{true};
+  double reset_pos_std_m_{5.0};
+  double reset_vel_std_mps_{5.0};
+  double reset_roll_pitch_std_deg_{5.0};
+  double reset_yaw_std_deg_{10.0};
+  bool enable_heading_update_{true};
+  double heading_update_std_deg_{3.0};
+  double heading_update_max_rate_hz_{10.0};
+  double heading_update_max_age_sec_{0.5};
+  double heading_update_low_speed_thresh_mps_{2.0};
+  bool heading_update_when_armed_{false};
+  double heading_update_armed_max_speed_thresh_mps_{6.0};
+  bool heading_update_when_disarmed_{true};
+  bool heading_update_when_armed_low_speed_{true};
+  bool heading_update_when_gnss_no_fix_{true};
+  bool last_gnss_has_fix_{true};
+  double last_heading_update_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_disarmed_yaw_lock_time_sec_{std::numeric_limits<double>::quiet_NaN()};
 
 

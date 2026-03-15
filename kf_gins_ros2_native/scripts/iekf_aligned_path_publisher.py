@@ -68,7 +68,7 @@ class IEKFAlignedPathPublisher(Node):
             qos_state = QoSProfile(
                 depth=10,
                 history=QoSHistoryPolicy.KEEP_LAST,
-                reliability=QoSReliabilityPolicy.RELIABLE,
+                reliability=QoSReliabilityPolicy.BEST_EFFORT,
             )
             self.state_sub = self.create_subscription(
                 State,
@@ -93,7 +93,9 @@ class IEKFAlignedPathPublisher(Node):
 
     def vec_callback(self, msg: Vector3Stamped):
         if self.require_armed:
-            if self.have_mavros_state and not self.mavros_armed:
+            if not self.have_mavros_state:
+                return
+            if not self.mavros_armed:
                 return
         pos = msg.vector
         if self.last_pos:

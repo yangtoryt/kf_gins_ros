@@ -124,6 +124,26 @@ public:
     }
 
     /**
+     * @brief 添加外部 heading/yaw 观测（NED yaw）
+     *        add external heading/yaw observation (NED yaw)
+     * @param [in] yaw_rad      heading measurement in radians
+     * @param [in] yaw_std_rad  heading std in radians
+     * @param [in] time         observation time
+     * */
+    void addHeadingData(double yaw_rad, double yaw_std_rad, double time) {
+        heading_obs_yaw_rad_ = yaw_rad;
+        heading_obs_std_rad_ = std::max(1e-4, std::abs(yaw_std_rad));
+        heading_obs_time_    = time;
+        has_heading_obs_     = true;
+    }
+
+    /**
+     * @brief 立即应用 heading 观测更新
+     *        apply heading observation update immediately
+     * */
+    void headingUpdate();
+
+    /**
      * @brief 获取当前时间
      *        get current time
      * */
@@ -320,6 +340,12 @@ private:
      *        update state using GNSS velocity observation
      * */
     void gnssVelUpdate();
+
+    // 外部 heading 观测数据
+    bool has_heading_obs_{false};
+    double heading_obs_yaw_rad_{0.0};
+    double heading_obs_std_rad_{1.0};
+    double heading_obs_time_{0.0};
 
     // GNSS 速度观测数据
     // GNSS velocity observation data

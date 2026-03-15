@@ -7,9 +7,28 @@ kf_gins_node:
     use_zero_velocity_update_when_disarmed: true  # 无人机未启动时应用零速度约束
     zupt_reset_interval_sec: 1.0    # 地面 ZUPT 复位间隔（秒）
     zupt_std_mps: 0.05              # 预留：未来可接入真 ZUPT 观测
-    disarmed_yaw_lock_enable: true
+    disarmed_yaw_lock_enable: false
     disarmed_yaw_lock_interval_sec: 1.0
     disarmed_yaw_lock_max_yaw_err_deg: 5.0
+    force_zero_antlever: true
+    enable_gnss_velocity_update: false
+    gnss_vel_std_floor_h_mps: 0.5
+    gnss_vel_std_floor_u_mps: 1.0
+    use_online_reset_covariance: true
+    reset_pos_std_m: 5.0
+    reset_vel_std_mps: 5.0
+    reset_roll_pitch_std_deg: 5.0
+    reset_yaw_std_deg: 10.0
+    enable_heading_update: true
+    heading_update_std_deg: 5.0
+    heading_update_max_rate_hz: 10.0
+    heading_update_max_age_sec: 0.5
+    heading_update_low_speed_thresh_mps: 2.0
+    heading_update_when_armed: true
+    heading_update_armed_max_speed_thresh_mps: 6.5
+    heading_update_when_disarmed: true
+    heading_update_when_armed_low_speed: true
+    heading_update_when_gnss_no_fix: true
     
     # ===== 原有参数（保持兼容） =====
     use_sim_time: true
@@ -28,7 +47,7 @@ kf_gins_node:
     min_dist_m: 1.0
 
     # 对齐/跳变门限
-    use_gnss_llh_for_pose: true
+    use_gnss_llh_for_pose: false
     use_gnss_llh_for_pose_when_disarmed: true
     start_after_gnss_sec: 1.0
     publish_after_sec: 1.0
@@ -48,7 +67,7 @@ kf_gins_node:
     use_steady_time_for_imu_dt: true
     force_monotonic_time_for_core: true
     min_imu_dt_sec: 0.001
-    max_imu_dt_sec: 0.50
+    max_imu_dt_sec: 0.06
     imu_dt_estimate_sec: 0.01
     auto_reset_on_time_jump: true
     time_jump_reset_threshold_sec: 0.5

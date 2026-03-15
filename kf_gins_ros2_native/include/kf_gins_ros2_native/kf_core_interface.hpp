@@ -20,6 +20,7 @@ public:
                           const Eigen::Vector3d& std_ned) = 0;
   virtual bool ingestGnssVel(double t_sec, double vN, double vE, double vD,
                              const Eigen::Vector3d& std_vel) = 0;
+  virtual bool ingestHeading(double t_sec, double yaw_deg, double yaw_std_deg) = 0;
   virtual State current() const = 0;
 };
 std::unique_ptr<KFCore> create_kf_core();

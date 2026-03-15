@@ -29,6 +29,12 @@
 #include "gi_engine.h"
 #include "insmech.h"
 
+namespace {
+double normalizeAngleRad(double rad) {
+    return std::atan2(std::sin(rad), std::cos(rad));
+}
+}  // namespace
+
 GIEngine::GIEngine(GINSOptions &options) {
 
     this->options_ = options;
@@ -633,6 +639,31 @@ void GIEngine::gnssVelUpdate() {
     Cov_ = 0.5 * (Cov_ + Cov_.transpose());
 
     has_vel_obs_ = false;
+}
+
+void GIEngine::headingUpdate() {
+
+    if (!has_heading_obs_) return;
+
+    Eigen::MatrixXd R_heading(1, 1);
+    R_heading(0, 0) = heading_obs_std_rad_ * heading_obs_std_rad_;
+
+    auto meas_model = [&](const PVA &pva, const ImuError &, Eigen::MatrixXd &dz, Eigen::MatrixXd &H) {
+        dz.resize(1, 1);
+        dz(0, 0) = normalizeAngleRad(pva.att.euler[2] - heading_obs_yaw_rad_);
+
+        H.resize(1, RANK);
+        H.setZero();
+        // 对于当前误差状态反馈约定，yaw 量测对 phi_z 的线性化符号应为负，
+        // 这样当预测 yaw 偏大时，更新会给出负的 delta_phi_z，把姿态拉回量测。
+        H(0, PHI_ID + 2) = -1.0;
+    };
+
+    IEKFUpdate(meas_model, R_heading, Cov_);
+    stateFeedback();
+    checkCov();
+
+    has_heading_obs_ = false;
 }
 
 NavState GIEngine::getNavState() {

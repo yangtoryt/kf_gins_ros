@@ -13,6 +13,9 @@ public:
   bool ingestGnss(double t,double lat,double lon,double h,const Eigen::Vector3d& std_ned) override {
     (void)std_ned; st_.sow=t; st_.lat_deg=lat; st_.lon_deg=lon; st_.h_m=h; return true;
   }
+  bool ingestHeading(double t, double yaw_deg, double yaw_std_deg) override {
+    (void)yaw_std_deg; st_.sow = t; st_.yaw_deg = yaw_deg; return true;
+  }
   State current() const override { return st_; }
 private: State st_;
 };

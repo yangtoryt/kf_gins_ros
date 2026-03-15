@@ -35,6 +35,17 @@ def generate_launch_description():
         ]),
         description='KF-GINS ROS2 param file (sim recommended)'
     )
+    kf_gins_core_config_file = DeclareLaunchArgument(
+        'kf_gins_core_config_file',
+        default_value=PathJoinSubstitution([
+            FindPackageShare('kf_gins_ros2_native'),
+            'external',
+            'KF-GINS',
+            'config',
+            'kf-gins.yaml'
+        ]),
+        description='Original KF-GINS core YAML loaded by the adapter'
+    )
     use_gnss_llh_for_pose = DeclareLaunchArgument(
         'use_gnss_llh_for_pose', default_value='false',
         description='Use GNSS LLH directly for /kf_gins/odom pose (visualization)'
@@ -103,6 +114,10 @@ def generate_launch_description():
         'mavros_local_pose_topic', default_value='/mavros/local_position/pose',
         description='MAVROS local pose topic (default: /mavros/local_position/pose)'
     )
+    mavros_local_velocity_topic = DeclareLaunchArgument(
+        'mavros_local_velocity_topic', default_value='/mavros/local_position/velocity_local',
+        description='MAVROS local velocity topic (default: /mavros/local_position/velocity_local)'
+    )
     mavros_state_topic = DeclareLaunchArgument(
         'mavros_state_topic', default_value='/mavros/state',
         description='MAVROS state topic (default: /mavros/state)'
@@ -156,7 +171,7 @@ def generate_launch_description():
     )
 
     aligned_path_require_armed = DeclareLaunchArgument(
-        'aligned_path_require_armed', default_value='false',
+        'aligned_path_require_armed', default_value='true',
         description='Require arming before publishing IEKF aligned path'
     )
 
@@ -352,10 +367,13 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             'input_topic': LaunchConfiguration('mavros_local_pose_topic'),
+            'velocity_topic': LaunchConfiguration('mavros_local_velocity_topic'),
             'output_topic': '/ekf2/pose',
             # 默认用 node time，确保与 IEKF 同一时间基准
             'use_input_stamp': LaunchConfiguration('ekf2_use_input_stamp'),
-            'use_covariance': False
+            'use_covariance': False,
+            'prefer_native_velocity': True,
+            'max_native_velocity_age_sec': 0.5,
         }]
     )
 
@@ -372,6 +390,7 @@ def generate_launch_description():
             {
                 'imu_topic': '/imu/data',
                 'gnss_topic': '/gps/fix',
+                'config_file': LaunchConfiguration('kf_gins_core_config_file'),
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
                 'use_gnss_llh_for_pose': LaunchConfiguration('use_gnss_llh_for_pose'),
                 # Time base robustness: prefer values from YAML (kfgins_sim_fixed.yaml)
@@ -546,6 +565,7 @@ def generate_launch_description():
         # 参数声明
         use_sim_time,
         kf_gins_param_file,
+        kf_gins_core_config_file,
         use_gnss_llh_for_pose,
         scenario,
         record_bag,
@@ -560,6 +580,7 @@ def generate_launch_description():
         mavros_imu_topic,
         mavros_gps_topic,
         mavros_local_pose_topic,
+        mavros_local_velocity_topic,
         mavros_state_topic,
         mavros_hil_gps_topic,
         enable_gps_dropzones,

@@ -6,7 +6,12 @@
 #include "common/types.h"
 
 #include <cmath>
+#include <iostream>
 #include <memory>
+#include <string>
+#include <vector>
+
+#include <yaml-cpp/yaml.h>
 
 namespace kfcore {
 
@@ -14,6 +19,197 @@ using Eigen::Vector3d;
 
 static inline double D2R(double d){ return d * M_PI / 180.0; }
 static inline double R2D(double r){ return r * 180.0 / M_PI; }
+
+namespace {
+
+bool loadOptionsFromYaml(const std::string& yaml_path, GINSOptions& options) {
+  YAML::Node config;
+  try {
+    config = YAML::LoadFile(yaml_path);
+  } catch (const YAML::Exception& exception) {
+    std::cerr << "Failed to read KF-GINS config '" << yaml_path
+              << "': " << exception.what() << std::endl;
+    return false;
+  }
+
+  std::vector<double> vec1, vec2, vec3, vec4, vec5, vec6;
+
+  try {
+    vec1 = config["initpos"].as<std::vector<double>>();
+    vec2 = config["initvel"].as<std::vector<double>>();
+    vec3 = config["initatt"].as<std::vector<double>>();
+    if (vec1.size() != 3 || vec2.size() != 3 || vec3.size() != 3) {
+      throw YAML::Exception(config.Mark(), "initpos/initvel/initatt must have 3 elements");
+    }
+  } catch (const YAML::Exception& exception) {
+    std::cerr << "Failed to load KF-GINS initial state from '" << yaml_path
+              << "': " << exception.what() << std::endl;
+    return false;
+  }
+
+  options.initstate.pos << D2R(vec1[0]), D2R(vec1[1]), vec1[2];
+  options.initstate.vel << vec2[0], vec2[1], vec2[2];
+  options.initstate.euler << D2R(vec3[0]), D2R(vec3[1]), D2R(vec3[2]);
+
+  try {
+    vec1 = config["initgyrbias"].as<std::vector<double>>();
+    vec2 = config["initaccbias"].as<std::vector<double>>();
+    vec3 = config["initgyrscale"].as<std::vector<double>>();
+    vec4 = config["initaccscale"].as<std::vector<double>>();
+    if (vec1.size() != 3 || vec2.size() != 3 || vec3.size() != 3 || vec4.size() != 3) {
+      throw YAML::Exception(config.Mark(), "initial IMU error arrays must have 3 elements");
+    }
+  } catch (const YAML::Exception& exception) {
+    std::cerr << "Failed to load KF-GINS initial IMU error from '" << yaml_path
+              << "': " << exception.what() << std::endl;
+    return false;
+  }
+
+  for (int i = 0; i < 3; ++i) {
+    options.initstate.imuerror.gyrbias[i]  = D2R(vec1[i]) / 3600.0;
+    options.initstate.imuerror.accbias[i]  = vec2[i] * 1e-5;
+    options.initstate.imuerror.gyrscale[i] = vec3[i] * 1e-6;
+    options.initstate.imuerror.accscale[i] = vec4[i] * 1e-6;
+  }
+
+  try {
+    vec1 = config["initposstd"].as<std::vector<double>>();
+    vec2 = config["initvelstd"].as<std::vector<double>>();
+    vec3 = config["initattstd"].as<std::vector<double>>();
+    if (vec1.size() != 3 || vec2.size() != 3 || vec3.size() != 3) {
+      throw YAML::Exception(config.Mark(), "initial state std arrays must have 3 elements");
+    }
+  } catch (const YAML::Exception& exception) {
+    std::cerr << "Failed to load KF-GINS initial covariance from '" << yaml_path
+              << "': " << exception.what() << std::endl;
+    return false;
+  }
+
+  for (int i = 0; i < 3; ++i) {
+    options.initstate_std.pos[i]   = vec1[i];
+    options.initstate_std.vel[i]   = vec2[i];
+    options.initstate_std.euler[i] = D2R(vec3[i]);
+  }
+
+  try {
+    vec1 = config["imunoise"]["arw"].as<std::vector<double>>();
+    vec2 = config["imunoise"]["vrw"].as<std::vector<double>>();
+    vec3 = config["imunoise"]["gbstd"].as<std::vector<double>>();
+    vec4 = config["imunoise"]["abstd"].as<std::vector<double>>();
+    vec5 = config["imunoise"]["gsstd"].as<std::vector<double>>();
+    vec6 = config["imunoise"]["asstd"].as<std::vector<double>>();
+    options.imunoise.corr_time = config["imunoise"]["corrtime"].as<double>();
+    if (vec1.size() != 3 || vec2.size() != 3 || vec3.size() != 3 ||
+        vec4.size() != 3 || vec5.size() != 3 || vec6.size() != 3) {
+      throw YAML::Exception(config.Mark(), "IMU noise arrays must have 3 elements");
+    }
+  } catch (const YAML::Exception& exception) {
+    std::cerr << "Failed to load KF-GINS IMU noise from '" << yaml_path
+              << "': " << exception.what() << std::endl;
+    return false;
+  }
+
+  for (int i = 0; i < 3; ++i) {
+    options.imunoise.gyr_arw[i]      = vec1[i];
+    options.imunoise.acc_vrw[i]      = vec2[i];
+    options.imunoise.gyrbias_std[i]  = vec3[i];
+    options.imunoise.accbias_std[i]  = vec4[i];
+    options.imunoise.gyrscale_std[i] = vec5[i];
+    options.imunoise.accscale_std[i] = vec6[i];
+  }
+
+  try {
+    vec1 = config["initbgstd"].as<std::vector<double>>();
+  } catch (const YAML::Exception&) {
+    vec1 = {options.imunoise.gyrbias_std.x(), options.imunoise.gyrbias_std.y(), options.imunoise.gyrbias_std.z()};
+  }
+  try {
+    vec2 = config["initbastd"].as<std::vector<double>>();
+  } catch (const YAML::Exception&) {
+    vec2 = {options.imunoise.accbias_std.x(), options.imunoise.accbias_std.y(), options.imunoise.accbias_std.z()};
+  }
+  try {
+    vec3 = config["initsgstd"].as<std::vector<double>>();
+  } catch (const YAML::Exception&) {
+    vec3 = {options.imunoise.gyrscale_std.x(), options.imunoise.gyrscale_std.y(), options.imunoise.gyrscale_std.z()};
+  }
+  try {
+    vec4 = config["initsastd"].as<std::vector<double>>();
+  } catch (const YAML::Exception&) {
+    vec4 = {options.imunoise.accscale_std.x(), options.imunoise.accscale_std.y(), options.imunoise.accscale_std.z()};
+  }
+
+  for (int i = 0; i < 3; ++i) {
+    options.initstate_std.imuerror.gyrbias[i]  = D2R(vec1[i]) / 3600.0;
+    options.initstate_std.imuerror.accbias[i]  = vec2[i] * 1e-5;
+    options.initstate_std.imuerror.gyrscale[i] = vec3[i] * 1e-6;
+    options.initstate_std.imuerror.accscale[i] = vec4[i] * 1e-6;
+  }
+
+  options.imunoise.gyr_arw *= (M_PI / 180.0 / 60.0);
+  options.imunoise.acc_vrw /= 60.0;
+  options.imunoise.gyrbias_std *= (M_PI / 180.0 / 3600.0);
+  options.imunoise.accbias_std *= 1e-5;
+  options.imunoise.gyrscale_std *= 1e-6;
+  options.imunoise.accscale_std *= 1e-6;
+  options.imunoise.corr_time *= 3600.0;
+
+  try {
+    vec1 = config["antlever"].as<std::vector<double>>();
+    if (vec1.size() != 3) {
+      throw YAML::Exception(config.Mark(), "antlever must have 3 elements");
+    }
+  } catch (const YAML::Exception& exception) {
+    std::cerr << "Failed to load KF-GINS antenna lever arm from '" << yaml_path
+              << "': " << exception.what() << std::endl;
+    return false;
+  }
+  options.antlever = Eigen::Vector3d(vec1[0], vec1[1], vec1[2]);
+
+  try {
+    if (config["sage_husa"]) {
+      if (config["sage_husa"]["enable"]) {
+        options.sage_husa.enable = config["sage_husa"]["enable"].as<bool>();
+      }
+      if (config["sage_husa"]["alpha"]) {
+        options.sage_husa.alpha = config["sage_husa"]["alpha"].as<double>();
+      }
+      if (config["sage_husa"]["diag_only"]) {
+        options.sage_husa.diag_only = config["sage_husa"]["diag_only"].as<bool>();
+      }
+      if (config["sage_husa"]["min_var_factor"]) {
+        options.sage_husa.min_var_factor = config["sage_husa"]["min_var_factor"].as<double>();
+      }
+      if (config["sage_husa"]["min_var_abs"]) {
+        options.sage_husa.min_var_abs = config["sage_husa"]["min_var_abs"].as<double>();
+      }
+    }
+  } catch (const YAML::Exception& exception) {
+    std::cerr << "Failed to load KF-GINS Sage-Husa options from '" << yaml_path
+              << "': " << exception.what() << std::endl;
+    return false;
+  }
+
+  try {
+    if (config["iekf_max_iterations"]) {
+      options.iekf_max_iterations = config["iekf_max_iterations"].as<int>();
+    }
+    if (config["iekf_convergence_threshold"]) {
+      options.iekf_convergence_threshold = config["iekf_convergence_threshold"].as<double>();
+    }
+    if (config["filter_mode"] && config["filter_mode"].as<int>() == 0) {
+      options.iekf_max_iterations = 1;
+    }
+  } catch (const YAML::Exception& exception) {
+    std::cerr << "Failed to load KF-GINS filter mode from '" << yaml_path
+              << "': " << exception.what() << std::endl;
+    return false;
+  }
+
+  return true;
+}
+
+}  // namespace
 
 class KFGinsCoreImpl : public KFCore {
 public:
@@ -23,8 +219,26 @@ public:
     // 不直接调用私有 initialize；让引擎在 IMU 传播中按内部逻辑起算
   }
 
-  bool configure(const std::string& /*yaml_path*/) override {
-    // 这里如果你想从 YAML 读参数，可扩展填充 options_
+  bool configure(const std::string& yaml_path) override {
+    if (yaml_path.empty()) {
+      return true;
+    }
+
+    GINSOptions loaded_options;
+    zeroOptions_(loaded_options);
+    if (!loadOptionsFromYaml(yaml_path, loaded_options)) {
+      return false;
+    }
+
+    options_ = loaded_options;
+    if (cfg_.force_zero_antlever) {
+      options_.antlever.setZero();
+    }
+    have_loaded_options_ = true;
+    engine_.reset(new GIEngine(options_));
+    last_state_ = State{};
+    last_time_ = 0.0;
+    std::cout << "Loaded KF-GINS core config: " << yaml_path << std::endl;
     return true;
   }
 
@@ -100,6 +314,17 @@ public:
     return true;
   }
 
+  bool ingestHeading(double t, double yaw_deg, double yaw_std_deg) override
+  {
+    const double yaw_rad = D2R(yaw_deg);
+    const double yaw_std_rad = D2R(std::max(0.1, std::abs(yaw_std_deg)));
+    engine_->addHeadingData(yaw_rad, yaw_std_rad, t);
+    engine_->headingUpdate();
+    last_time_ = t;
+    fillState_(engine_->getNavState(), last_state_);
+    return true;
+  }
+
   // ★ 新增：实现接口所需 reset（不直接调私有 initialize）
   bool reset(double lat_deg, double lon_deg, double h_m, double yaw_deg) override
   {
@@ -110,27 +335,42 @@ public:
                                 D2R(cfg_.init_pitch_deg),
                                 D2R(yaw_deg);
 
-    // 合理的初始方差
-    // 【v5.0修复】ZUPT重置时无人机静止在地面，速度已知为~0。
-    // v4.0 将 vel_std 从 1.0 改为 100.0，目的是让 GNSS "拉得动"。
-    // 但 100.0 导致 P[V,V]=10000，GNSS 观测全被速度吸收，
-    // 姿态完全不可观，起飞后姿态漂移 → 重力投影错 → 发散到 217km。
-    // v4.0 的 "锁死" 问题根因是双重 IMU 补偿 bug（已在本版修复），
-    // 而非 vel_std 太小。现改为 5.0：足够宽松让滤波器适应初始误差，
-    // 又不至于完全屏蔽姿态可观性。
-    options_.initstate_std.pos.setConstant(5.0);
-    options_.initstate_std.vel.setConstant(5.0);  // 从100.0改回5.0 【v5.0修复】
-    options_.initstate_std.euler << D2R(5.0), D2R(5.0), D2R(10.0);
-
-    // 【关键修复】IMU 偏差初始 STD — 与 zeroOptions_ 保持一致
-    options_.initstate_std.imuerror.gyrbias  = Vector3d::Constant(D2R(500.0) / 3600.0);
-    options_.initstate_std.imuerror.accbias  = Vector3d::Constant(5000e-6 * 9.80665);
-    options_.initstate_std.imuerror.gyrscale = Vector3d::Constant(5000.0e-6);
-    options_.initstate_std.imuerror.accscale = Vector3d::Constant(5000.0e-6);
+    if (cfg_.use_online_reset_covariance) {
+      // 在线 reset 与原始离线后处理的初始协方差需求不同：
+      // 即使已经加载了 KF-GINS YAML，也要用一套更宽松的 reset 协方差，
+      // 否则会对初始 yaw/速度过度自信，导致起飞后难以拉回。
+      options_.initstate_std.pos.setConstant(std::max(0.1, cfg_.reset_pos_std_m));
+      options_.initstate_std.vel.setConstant(std::max(0.1, cfg_.reset_vel_std_mps));
+      options_.initstate_std.euler
+        << D2R(std::max(0.1, cfg_.reset_roll_pitch_std_deg)),
+           D2R(std::max(0.1, cfg_.reset_roll_pitch_std_deg)),
+           D2R(std::max(0.1, cfg_.reset_yaw_std_deg));
+      options_.initstate_std.imuerror.gyrbias  = Vector3d::Constant(D2R(500.0) / 3600.0);
+      options_.initstate_std.imuerror.accbias  = Vector3d::Constant(5000e-6 * 9.80665);
+      options_.initstate_std.imuerror.gyrscale = Vector3d::Constant(5000.0e-6);
+      options_.initstate_std.imuerror.accscale = Vector3d::Constant(5000.0e-6);
+    } else if (!have_loaded_options_) {
+      // 没有外部 YAML 且未显式启用在线 reset 协方差时，保留默认值。
+      options_.initstate_std.pos.setConstant(5.0);
+      options_.initstate_std.vel.setConstant(5.0);
+      options_.initstate_std.euler << D2R(5.0), D2R(5.0), D2R(10.0);
+      options_.initstate_std.imuerror.gyrbias  = Vector3d::Constant(D2R(500.0) / 3600.0);
+      options_.initstate_std.imuerror.accbias  = Vector3d::Constant(5000e-6 * 9.80665);
+      options_.initstate_std.imuerror.gyrscale = Vector3d::Constant(5000.0e-6);
+      options_.initstate_std.imuerror.accscale = Vector3d::Constant(5000.0e-6);
+    }
 
     engine_.reset(new GIEngine(options_));
-    // 让引擎后续在 IMU 推进中根据 GNSS/内逻辑进入工作
-    last_state_ = State{};
+    // 让 current() 在首次 IMU 推进前也能反映 reset 后的初值，避免上层读到空状态。
+    last_state_.lat_deg = lat_deg;
+    last_state_.lon_deg = lon_deg;
+    last_state_.h_m = h_m;
+    last_state_.roll_deg = cfg_.init_roll_deg;
+    last_state_.pitch_deg = cfg_.init_pitch_deg;
+    last_state_.yaw_deg = yaw_deg;
+    last_state_.vN = 0.0;
+    last_state_.vE = 0.0;
+    last_state_.vD = 0.0;
     last_time_  = 0.0;
     return true;
   }
@@ -185,6 +425,7 @@ private:
   AdapterConfig cfg_;
   std::unique_ptr<GIEngine> engine_;
   GINSOptions options_{};
+  bool have_loaded_options_{false};
 
   State  last_state_{};
   double last_time_{0.0};

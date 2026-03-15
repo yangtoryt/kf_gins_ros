@@ -6,6 +6,7 @@ project(kf_gins_adapter)
 
 # Find Eigen3 - required by KF-GINS
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(yaml-cpp REQUIRED)
 
 add_library(kf_gins_core_adapter STATIC
   adapter.cpp
@@ -28,7 +29,7 @@ target_include_directories(kf_gins_core_adapter PUBLIC
 )
 
 # Link Eigen3 library
-target_link_libraries(kf_gins_core_adapter PUBLIC Eigen3::Eigen)
+target_link_libraries(kf_gins_core_adapter PUBLIC Eigen3::Eigen yaml-cpp)
 
 # fPIC to link into shared nodes
 set_target_properties(kf_gins_core_adapter PROPERTIES POSITION_INDEPENDENT_CODE ON)

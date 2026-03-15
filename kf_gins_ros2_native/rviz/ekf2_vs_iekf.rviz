@@ -58,14 +58,17 @@ Visualization Manager:
     - Class: rviz_default_plugins/Path
       Enabled: true
       Name: IEKF Path
+      Pose Style: None
       Topic: /kf_gins/path_iekf
     - Class: rviz_default_plugins/Path
       Enabled: true
       Name: IEKF Aligned Path
+      Pose Style: None
       Topic: /iekf/path_aligned
     - Class: rviz_default_plugins/Path
       Enabled: true
       Name: EKF2 Path
+      Pose Style: None
       Topic: /ekf2/path
     - Class: rviz_default_plugins/Odometry
       Enabled: false

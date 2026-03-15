@@ -76,5 +76,6 @@ install(TARGETS kf_gins_node kf_gins_node_lib
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY launch/ DESTINATION launch)
 install(DIRECTORY launch rviz config models worlds DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY external/KF-GINS/config/ DESTINATION share/${PROJECT_NAME}/external/KF-GINS/config)
 
 ament_package()
