@@ -1,0 +1,5 @@
+| 场景名称    | 世界类型                        | 建筑密度   | 拒止区设置                     | 拒止区数量 | 主要用途                                                |
+| ------- | --------------------------- | ------ | ------------------------- | ----- | --------------------------------------------------- |
+| S_open  | PX4 default world           | Low    | No permanent outage zone  | 0     | Open-field baseline comparison                      |
+| S_urban | Custom urban world          | High   | Static GNSS denied blocks | 2     | Evaluate multipath and dense-building effects       |
+| S_mixed | Semi-obstructed mixed world | Medium | Transition outage region  | 1     | Observe recovery from open to obstructed conditions |

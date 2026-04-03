@@ -84,7 +84,7 @@ def generate_launch_description():
         description='Publish aligned IEKF state topics for PlotJuggler'
     )
     aligned_fallback_raw = DeclareLaunchArgument(
-        'aligned_fallback_raw', default_value='true',
+        'aligned_fallback_raw', default_value='false',
         description='Publish raw IEKF on /iekf/state_aligned before alignment is ready'
     )
     ekf2_use_input_stamp = DeclareLaunchArgument(
@@ -95,6 +95,10 @@ def generate_launch_description():
     imu_use_node_stamp = DeclareLaunchArgument(
         'imu_use_node_stamp', default_value='false',
         description='Use /clock stamp for IMU output (false uses MAVROS stamp)'
+    )
+    enable_imu_converter = DeclareLaunchArgument(
+        'enable_imu_converter', default_value='false',
+        description='Run imu_flu_to_frd.py only for diagnostics; KF-GINS subscribes raw IMU directly'
     )
 
     # ============ MAVROS topics (可覆盖) ============
@@ -206,7 +210,8 @@ def generate_launch_description():
             # 当 /clock 不前进时回退到输入时间戳，保证单调
             'fallback_to_input_stamp': True,
             'force_monotonic_stamp': True,
-        }]
+        }],
+        condition=IfCondition(LaunchConfiguration('enable_imu_converter'))
     )
 
     gnss_relay = Node(
@@ -340,6 +345,14 @@ def generate_launch_description():
             'frame_id': 'map',
             'max_path_length': 20000,
             'min_distance': 0.05,
+            'require_armed': True,
+            'clear_on_arm_transition': False,
+            'clear_on_reset_event': False,
+            'mavros_state_topic': LaunchConfiguration('mavros_state_topic'),
+            'startup_ignore_sec': 3.0,
+            'max_abs_position_m': 10000.0,
+            'max_abs_velocity_mps': 100.0,
+            'max_jump_distance_m': 50.0,
         }],
     )
 
@@ -388,11 +401,12 @@ def generate_launch_description():
         parameters=[
             kf_gins_config,
             {
-                'imu_topic': '/imu/data',
+                'imu_topic': LaunchConfiguration('mavros_imu_topic'),
                 'gnss_topic': '/gps/fix',
                 'config_file': LaunchConfiguration('kf_gins_core_config_file'),
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
                 'use_gnss_llh_for_pose': LaunchConfiguration('use_gnss_llh_for_pose'),
+                'imu_input_is_flu': True,
                 # Time base robustness: prefer values from YAML (kfgins_sim_fixed.yaml)
                 # 【修复】仿真环境 GNSS 协方差自适应参数
                 'use_sim_gnss_std': LaunchConfiguration('use_sim_gnss_std'),
@@ -400,8 +414,9 @@ def generate_launch_description():
                 'sim_gnss_std_u_m': LaunchConfiguration('sim_gnss_std_u_m'),
                 # RViz Path gating: disarmed 时不画 Path，避免起飞前"蜘蛛网"
                 'mavros_state_topic': LaunchConfiguration('mavros_state_topic'),
+                'mavros_local_velocity_topic': LaunchConfiguration('mavros_local_velocity_topic'),
                 'path_require_armed': True,
-                'clear_path_on_arm_transition': True,
+                'clear_path_on_arm_transition': False,
             }
         ]
     )
@@ -421,6 +436,12 @@ def generate_launch_description():
             'metrics_publish_rate': 50,  # 50 Hz
             'sync_tolerance_ms': 50,
             'align_initial': True,
+            'max_abs_position_m': 10000.0,
+            'max_abs_velocity_mps': 100.0,
+            'max_pose_jump_m': 50.0,
+            'max_velocity_jump_mps': 100.0,
+            'recompute_alignment_on_jump': True,
+            'clear_error_history_on_realign': True,
             'aligned_fallback_raw': LaunchConfiguration('aligned_fallback_raw'),
             'publish_iekf_state': LaunchConfiguration('publish_iekf_state'),
             'publish_ekf2_state': LaunchConfiguration('publish_ekf2_state'),
@@ -441,7 +462,8 @@ def generate_launch_description():
             'frame_id': 'map',
             'max_path_length': 20000,
             'require_armed': LaunchConfiguration('aligned_path_require_armed'),
-            'clear_on_arm_transition': True,
+            'clear_on_arm_transition': False,
+            'clear_on_reset_event': False,
             'mavros_state_topic': LaunchConfiguration('mavros_state_topic'),
         }],
         condition=IfCondition(LaunchConfiguration('enable_real_time_comparison'))
@@ -577,6 +599,7 @@ def generate_launch_description():
         aligned_fallback_raw,
         ekf2_use_input_stamp,
         imu_use_node_stamp,
+        enable_imu_converter,
         mavros_imu_topic,
         mavros_gps_topic,
         mavros_local_pose_topic,

@@ -1,0 +1,8 @@
+| 指标名称                          | 符号      | 反映维度                                  | 使用场景                            |
+| ----------------------------- | ------- | ------------------------------------- | ------------------------------- |
+| Position RMSE                 | RMSE_p  | Overall positioning accuracy          | All scenarios                   |
+| Velocity RMSE                 | RMSE_v  | Velocity estimation accuracy          | All scenarios                   |
+| Yaw RMS                       | RMS_psi | Heading estimation accuracy           | All scenarios                   |
+| Maximum drift                 | e_max   | Worst outage-stage position deviation | GNSS denied interval            |
+| Recovery time                 | T_rec   | Post-outage reconvergence speed       | GNSS recovery stage             |
+| Normalized innovation squared | NIS     | Innovation consistency                | Adaptive-R consistency analysis |

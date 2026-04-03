@@ -1,0 +1,6 @@
+﻿算法名称,是否迭代更新,是否自适应R,是否有边界保护,说明
+A_ekf2,No,No,No,PX4 native EKF2 baseline
+A_ekf,No,No,No,KF-GINS standard error-state EKF
+A_iekf,Yes,No,No,KF-GINS with iterated measurement update
+A_sh,No,Yes,Yes,EKF with Sage-Husa adaptive measurement noise
+A_aiekf,Yes,Yes,Yes,Full proposed method: IEKF + adaptive R

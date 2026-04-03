@@ -1,0 +1,130 @@
+{
+  "outage_durations_s": [1, 5, 10, 20],
+  "scenes": [
+    {
+      "scene_name": "S_open",
+      "world_type": "PX4 default world",
+      "building_density": "Low",
+      "denied_zone_setup": "No permanent outage zone",
+      "denied_zone_count": 0,
+      "purpose": "Open-field baseline comparison"
+    },
+    {
+      "scene_name": "S_urban",
+      "world_type": "Custom urban world",
+      "building_density": "High",
+      "denied_zone_setup": "Static GNSS denied blocks",
+      "denied_zone_count": 2,
+      "purpose": "Evaluate multipath and dense-building effects"
+    },
+    {
+      "scene_name": "S_mixed",
+      "world_type": "Semi-obstructed mixed world",
+      "building_density": "Medium",
+      "denied_zone_setup": "Transition outage region",
+      "denied_zone_count": 1,
+      "purpose": "Observe recovery from open to obstructed conditions"
+    }
+  ],
+  "algorithms": [
+    {
+      "algorithm_name": "A_ekf2",
+      "iterative_update": "No",
+      "adaptive_r": "No",
+      "bounded_r": "No",
+      "description": "PX4 native EKF2 baseline"
+    },
+    {
+      "algorithm_name": "A_ekf",
+      "iterative_update": "No",
+      "adaptive_r": "No",
+      "bounded_r": "No",
+      "description": "KF-GINS standard error-state EKF"
+    },
+    {
+      "algorithm_name": "A_iekf",
+      "iterative_update": "Yes",
+      "adaptive_r": "No",
+      "bounded_r": "No",
+      "description": "KF-GINS with iterated measurement update"
+    },
+    {
+      "algorithm_name": "A_sh",
+      "iterative_update": "No",
+      "adaptive_r": "Yes",
+      "bounded_r": "Yes",
+      "description": "EKF with Sage-Husa adaptive measurement noise"
+    },
+    {
+      "algorithm_name": "A_aiekf",
+      "iterative_update": "Yes",
+      "adaptive_r": "Yes",
+      "bounded_r": "Yes",
+      "description": "Full proposed method: IEKF + adaptive R"
+    }
+  ],
+  "trajectories": [
+    {
+      "trajectory_name": "P_line",
+      "avg_speed_mps": 8.0,
+      "max_speed_mps": 10.0,
+      "max_turn_rate_dps": 0.0,
+      "crosses_denied_zone": "Optional",
+      "purpose": "Assess steady-state accuracy with weak maneuver excitation"
+    },
+    {
+      "trajectory_name": "P_circle",
+      "avg_speed_mps": 9.0,
+      "max_speed_mps": 12.0,
+      "max_turn_rate_dps": 18.0,
+      "crosses_denied_zone": "Yes",
+      "purpose": "Evaluate coupling between attitude and heading changes"
+    },
+    {
+      "trajectory_name": "P_agile",
+      "avg_speed_mps": 11.0,
+      "max_speed_mps": 16.0,
+      "max_turn_rate_dps": 45.0,
+      "crosses_denied_zone": "Yes",
+      "purpose": "Highlight nonlinear and scale-sensitive estimation errors"
+    }
+  ],
+  "metrics": [
+    {
+      "metric_name": "Position RMSE",
+      "symbol": "RMSE_p",
+      "dimension": "Overall positioning accuracy",
+      "usage": "All scenarios"
+    },
+    {
+      "metric_name": "Velocity RMSE",
+      "symbol": "RMSE_v",
+      "dimension": "Velocity estimation accuracy",
+      "usage": "All scenarios"
+    },
+    {
+      "metric_name": "Yaw RMS",
+      "symbol": "RMS_psi",
+      "dimension": "Heading estimation accuracy",
+      "usage": "All scenarios"
+    },
+    {
+      "metric_name": "Maximum drift",
+      "symbol": "e_max",
+      "dimension": "Worst outage-stage position deviation",
+      "usage": "GNSS denied interval"
+    },
+    {
+      "metric_name": "Recovery time",
+      "symbol": "T_rec",
+      "dimension": "Post-outage reconvergence speed",
+      "usage": "GNSS recovery stage"
+    },
+    {
+      "metric_name": "Normalized innovation squared",
+      "symbol": "NIS",
+      "dimension": "Innovation consistency",
+      "usage": "Adaptive-R consistency analysis"
+    }
+  ]
+}

@@ -45,6 +45,7 @@ class ImuFluToFrdImproved(Node):
         self.declare_parameter('force_monotonic_stamp', True)
         self.declare_parameter('fallback_to_input_stamp', True)
         self.declare_parameter('debug_log', True)
+        self.declare_parameter('warn_gap_ms', 60.0)
 
         self.input_topic = self.get_parameter('input_topic').get_parameter_value().string_value
         self.output_topic = self.get_parameter('output_topic').get_parameter_value().string_value
@@ -54,6 +55,7 @@ class ImuFluToFrdImproved(Node):
         self.force_monotonic_stamp = self.get_parameter('force_monotonic_stamp').get_parameter_value().bool_value
         self.fallback_to_input_stamp = self.get_parameter('fallback_to_input_stamp').get_parameter_value().bool_value
         self.debug_log = self.get_parameter('debug_log').get_parameter_value().bool_value
+        self.warn_gap_ms = float(self.get_parameter('warn_gap_ms').value)
 
         self.sub = self.create_subscription(Imu, self.input_topic, self.cb, qos_profile_sensor_data)
 
@@ -71,6 +73,8 @@ class ImuFluToFrdImproved(Node):
         self.backward_dt_count = 0
         self.adjusted_stamp_count = 0
         self.last_stamp = None
+        self.last_input_stamp = None
+        self.last_recv_time = None
         self.estimated_dt_ms = 0
         self.dt_history = deque(maxlen=100)
 
@@ -103,6 +107,14 @@ class ImuFluToFrdImproved(Node):
         
         # 获取原始时间戳
         input_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        recv_time = self.get_clock().now().nanoseconds * 1e-9
+
+        input_dt_ms = None
+        recv_dt_ms = None
+        if self.last_input_stamp is not None:
+            input_dt_ms = (input_stamp - self.last_input_stamp) * 1000.0
+        if self.last_recv_time is not None:
+            recv_dt_ms = (recv_time - self.last_recv_time) * 1000.0
         
         # ========== 时间戳处理 ==========
         final_stamp_sec = input_stamp
@@ -175,6 +187,27 @@ class ImuFluToFrdImproved(Node):
                 )
         
         self.last_stamp = final_stamp_sec
+        self.last_input_stamp = input_stamp
+        self.last_recv_time = recv_time
+
+        final_dt_ms = None
+        if dt_ms_adj is not None:
+            final_dt_ms = dt_ms_adj
+        elif dt_ms is not None:
+            final_dt_ms = dt_ms
+
+        warn_gap_ms = max(1.0, self.warn_gap_ms)
+        if (
+            (input_dt_ms is not None and input_dt_ms > warn_gap_ms) or
+            (recv_dt_ms is not None and recv_dt_ms > warn_gap_ms) or
+            (final_dt_ms is not None and final_dt_ms > warn_gap_ms)
+        ):
+            def fmt(v):
+                return 'n/a' if v is None else f'{v:.2f}'
+            self.get_logger().warn(
+                f'IMU gap detected: input_dt={fmt(input_dt_ms)}ms, '
+                f'recv_dt={fmt(recv_dt_ms)}ms, output_dt={fmt(final_dt_ms)}ms'
+            )
         
         # ========== 构建输出消息 ==========
         out = Imu()

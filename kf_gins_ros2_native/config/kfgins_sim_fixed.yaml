@@ -11,9 +11,9 @@ kf_gins_node:
     disarmed_yaw_lock_interval_sec: 1.0
     disarmed_yaw_lock_max_yaw_err_deg: 5.0
     force_zero_antlever: true
-    enable_gnss_velocity_update: false
-    gnss_vel_std_floor_h_mps: 0.5
-    gnss_vel_std_floor_u_mps: 1.0
+    enable_gnss_velocity_update: true
+    gnss_vel_std_floor_h_mps: 0.15
+    gnss_vel_std_floor_u_mps: 0.3
     use_online_reset_covariance: true
     reset_pos_std_m: 5.0
     reset_vel_std_mps: 5.0
@@ -23,18 +23,36 @@ kf_gins_node:
     heading_update_std_deg: 5.0
     heading_update_max_rate_hz: 10.0
     heading_update_max_age_sec: 0.5
+    heading_update_innovation_gate_deg: 45.0
+    heading_update_armed_innovation_gate_deg: 8.0
+    heading_update_max_source_yaw_rate_deg_s: 15.0
+    heading_update_source_jump_gate_deg: 20.0
+    heading_update_source_jump_block_sec: 2.0
     heading_update_low_speed_thresh_mps: 2.0
+    heading_update_armed_min_horizontal_speed_mps: 0.0
+    heading_update_max_vertical_speed_mps: 3.0
+    preserved_core_yaw_max_mavros_diff_deg: 15.0
+    preserved_core_yaw_max_core_gnss_diff_m: 5.0
     heading_update_when_armed: true
     heading_update_armed_max_speed_thresh_mps: 6.5
     heading_update_when_disarmed: true
     heading_update_when_armed_low_speed: true
     heading_update_when_gnss_no_fix: true
+    skip_medium_imu_gap_when_turning: true
+    imu_gap_turn_rate_gate_deg_s: 10.0
+    imu_gap_vertical_speed_gate_mps: 1.0
+    imu_gap_accel_deviation_gate_mps2: 2.0
+    imu_gap_maneuver_cooldown_sec: 1.0
+    skip_large_imu_gap_samples: true
+    severe_imu_gap_reset_sec: 0.16
     
     # ===== 原有参数（保持兼容） =====
     use_sim_time: true
-    imu_topic: /imu/data
+    imu_topic: /mavros/imu/data_raw
     gnss_topic: /gps/fix
     imu_is_delta: false
+    imu_input_is_flu: true
+    imu_gap_warn_ms: 60.0
 
     map_frame: map
     odom_frame: map
@@ -48,13 +66,14 @@ kf_gins_node:
 
     # 对齐/跳变门限
     use_gnss_llh_for_pose: false
-    use_gnss_llh_for_pose_when_disarmed: true
+    use_gnss_llh_for_pose_when_disarmed: false
     start_after_gnss_sec: 1.0
     publish_after_sec: 1.0
     align_gate_m: 5.0
     max_jump_m: 30.0
     reset_gate_m: 8.0
     v_limit_mps: 20.0
+    publish_max_core_gnss_diff_m: 5.0
 
     # GNSS 默认标准差（用于实机模式）
     gnss_default_std_h_m: 5.0
@@ -67,7 +86,7 @@ kf_gins_node:
     use_steady_time_for_imu_dt: true
     force_monotonic_time_for_core: true
     min_imu_dt_sec: 0.001
-    max_imu_dt_sec: 0.06
+    max_imu_dt_sec: 0.05
     imu_dt_estimate_sec: 0.01
     auto_reset_on_time_jump: true
     time_jump_reset_threshold_sec: 0.5

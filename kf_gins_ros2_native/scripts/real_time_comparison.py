@@ -18,7 +18,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from geometry_msgs.msg import PoseStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Float32MultiArray, Float32, Bool
+from std_msgs.msg import Float32MultiArray, Float32, Bool, UInt32
 import numpy as np
 from collections import deque
 from typing import Optional
@@ -79,11 +79,18 @@ class RealTimeComparison(Node):
         self.ekf2_odom_topic = self.declare_parameter('ekf2_odom_topic', '/ekf2/pose_odom').value
         self.iekf_topic = self.declare_parameter('iekf_topic', '/kf_gins/odom').value
         self.comparison_output = self.declare_parameter('comparison_output', '/comparison/metrics').value
+        self.iekf_reset_topic = self.declare_parameter('iekf_reset_topic', '/kf_gins/reset_event').value
         self.metrics_publish_rate = self.declare_parameter('metrics_publish_rate', 50).value
         self.sync_tolerance_ms = self.declare_parameter('sync_tolerance_ms', 20).value
         self.align_initial = self.declare_parameter('align_initial', True).value
         self.buffer_len = self.declare_parameter('buffer_len', 200).value
         self.publish_named_metrics = bool(self.declare_parameter('publish_named_metrics', True).value)
+        self.max_abs_position_m = float(self.declare_parameter('max_abs_position_m', 10000.0).value)
+        self.max_abs_velocity_mps = float(self.declare_parameter('max_abs_velocity_mps', 100.0).value)
+        self.max_pose_jump_m = float(self.declare_parameter('max_pose_jump_m', 50.0).value)
+        self.max_velocity_jump_mps = float(self.declare_parameter('max_velocity_jump_mps', 100.0).value)
+        self.recompute_alignment_on_jump = bool(self.declare_parameter('recompute_alignment_on_jump', True).value)
+        self.clear_error_history_on_realign = bool(self.declare_parameter('clear_error_history_on_realign', True).value)
         
         # PlotJuggler 友好的“单独状态”输出（分别看到 EKF2/IEKF）
         # 说明：
@@ -118,6 +125,8 @@ class RealTimeComparison(Node):
         
         # 历史数据 (用于 RMSE 计算)
         self.position_error_history = deque(maxlen=5000)  # 100 秒 @ 50Hz
+        self._last_valid_ekf2: Optional[PoseData] = None
+        self._last_valid_iekf: Optional[PoseData] = None
         
         # 初始化标志
         self.ekf2_initialized = False
@@ -150,6 +159,13 @@ class RealTimeComparison(Node):
             Odometry,
             self.iekf_topic,
             self.iekf_callback,
+            qos
+        )
+
+        self.iekf_reset_sub = self.create_subscription(
+            UInt32,
+            self.iekf_reset_topic,
+            self.iekf_reset_callback,
             qos
         )
         
@@ -250,9 +266,12 @@ class RealTimeComparison(Node):
             f"  EKF2 pose: {self.ekf2_pose_topic}\n"
             f"  EKF2 odom: {self.ekf2_odom_topic}\n"
             f"  IEKF: {self.iekf_topic}\n"
+            f"  IEKF reset topic: {self.iekf_reset_topic}\n"
             f"  发布频率: {self.metrics_publish_rate} Hz\n"
             f"  同步容差: ±{self.sync_tolerance_ms} ms\n"
             f"  初始对齐: {'开启' if self.align_initial else '关闭'}\n"
+            f"  异常过滤: max_abs_position={self.max_abs_position_m:.1f} m, "
+            f"max_pose_jump={self.max_pose_jump_m:.1f} m\n"
             f"  PlotJuggler 状态输出: "
             f"EKF2={'开启' if self.publish_ekf2_state else '关闭'}, "
             f"IEKF={'开启' if self.publish_iekf_state else '关闭'}, "
@@ -292,8 +311,11 @@ class RealTimeComparison(Node):
                 x=pos.x, y=pos.y, z=pos.z,
                 roll=roll, pitch=pitch, yaw=yaw
             )
+            if not self._accept_pose_sample("EKF2", data, self._last_valid_ekf2):
+                return
             self.ekf2_data = data
             self.ekf2_buf.append(data)
+            self._last_valid_ekf2 = data
 
             # 发布 EKF2 状态（无速度时 vx/vy/vz=0），便于 PlotJuggler 立即看到曲线
             if self.publish_ekf2_state:
@@ -323,8 +345,11 @@ class RealTimeComparison(Node):
                 roll=roll, pitch=pitch, yaw=yaw,
                 vx=twist.linear.x, vy=twist.linear.y, vz=twist.linear.z
             )
+            if not self._accept_pose_sample("EKF2", data, self._last_valid_ekf2):
+                return
             self.ekf2_data = data
             self.ekf2_buf.append(data)
+            self._last_valid_ekf2 = data
 
             if self.publish_ekf2_state:
                 self._publish_ekf2_state(msg.header.stamp, data)
@@ -358,8 +383,11 @@ class RealTimeComparison(Node):
                 roll=roll, pitch=pitch, yaw=yaw,
                 vx=twist.linear.x, vy=twist.linear.y, vz=twist.linear.z
             )
+            if not self._accept_pose_sample("IEKF", data, self._last_valid_iekf):
+                return
             self.iekf_data = data
             self.iekf_buf.append(data)
+            self._last_valid_iekf = data
 
             if self.publish_iekf_state:
                 self._publish_iekf_state(msg.header.stamp, data)
@@ -371,6 +399,9 @@ class RealTimeComparison(Node):
             
         except Exception as e:
             self.get_logger().error(f"IEKF 处理错误: {e}", throttle_duration_sec=5)
+
+    def iekf_reset_callback(self, msg: UInt32):
+        self._handle_iekf_reset_event(msg.data)
 
     def compute_and_publish_metrics(self):
         """计算并发布对比指标"""
@@ -460,6 +491,8 @@ class RealTimeComparison(Node):
         return msg
 
     def _publish_state_vectors(self, stamp_msg, ekf2: PoseData, iekf: PoseData) -> None:
+        if not self._pose_is_reasonable(ekf2) or not self._pose_is_reasonable(iekf):
+            return
         if self.ekf2_pos_pub is not None:
             self.ekf2_pos_pub.publish(self._make_vec(stamp_msg, ekf2.x, ekf2.y, ekf2.z))
         if self.ekf2_vel_pub is not None:
@@ -516,6 +549,8 @@ class RealTimeComparison(Node):
         return msg
 
     def _publish_ekf2_state(self, stamp_msg, ekf2: PoseData) -> None:
+        if not self._pose_is_reasonable(ekf2):
+            return
         if self.ekf2_pos_pub is not None:
             self.ekf2_pos_pub.publish(self._make_vec(stamp_msg, ekf2.x, ekf2.y, ekf2.z))
         if self.ekf2_vel_pub is not None:
@@ -524,6 +559,8 @@ class RealTimeComparison(Node):
             self.ekf2_rpy_pub.publish(self._make_vec(stamp_msg, ekf2.roll, ekf2.pitch, ekf2.yaw))
 
     def _publish_iekf_state(self, stamp_msg, iekf: PoseData) -> None:
+        if not self._pose_is_reasonable(iekf):
+            return
         if self.iekf_pos_pub is not None:
             self.iekf_pos_pub.publish(self._make_vec(stamp_msg, iekf.x, iekf.y, iekf.z))
         if self.iekf_vel_pub is not None:
@@ -565,6 +602,66 @@ class RealTimeComparison(Node):
     def _pose_is_finite(p: PoseData) -> bool:
         vals = np.array([p.x, p.y, p.z, p.roll, p.pitch, p.yaw, p.vx, p.vy, p.vz], dtype=float)
         return bool(np.all(np.isfinite(vals)))
+
+    def _pose_is_reasonable(self, p: PoseData) -> bool:
+        if not self._pose_is_finite(p):
+            return False
+        if max(abs(p.x), abs(p.y), abs(p.z)) > self.max_abs_position_m:
+            return False
+        speed = math.sqrt(p.vx * p.vx + p.vy * p.vy + p.vz * p.vz)
+        if speed > self.max_abs_velocity_mps:
+            return False
+        return True
+
+    def _pose_jump_too_large(self, prev: PoseData, cur: PoseData) -> bool:
+        pos_jump = math.sqrt((cur.x - prev.x) ** 2 + (cur.y - prev.y) ** 2 + (cur.z - prev.z) ** 2)
+        vel_jump = math.sqrt((cur.vx - prev.vx) ** 2 + (cur.vy - prev.vy) ** 2 + (cur.vz - prev.vz) ** 2)
+        return pos_jump > self.max_pose_jump_m or vel_jump > self.max_velocity_jump_mps
+
+    def _invalidate_alignment(self, reason: str) -> None:
+        if self.align_initial and self.recompute_alignment_on_jump:
+            self._offset_ready = False
+            self._pos_offset = np.zeros(3, dtype=float)
+            self._yaw_offset = 0.0
+            self._aligned_fallback_warned = False
+            self.last_pair_key = None
+            if self.clear_error_history_on_realign:
+                self.position_error_history.clear()
+            self.get_logger().warn(f"Alignment invalidated: {reason}", throttle_duration_sec=2.0)
+
+    def _handle_iekf_reset_event(self, seq: int) -> None:
+        self._invalidate_alignment(f"IEKF reset event #{seq}")
+        self.iekf_buf.clear()
+        self._last_valid_iekf = None
+        self.iekf_data = None
+        self.last_pair_key = None
+        self.get_logger().warn(
+            f"IEKF reset event #{seq}: cleared IEKF buffer and forcing realignment on next sync.",
+            throttle_duration_sec=1.0,
+        )
+
+    def _accept_pose_sample(self, source: str, cur: PoseData, prev: Optional[PoseData]) -> bool:
+        if not self._pose_is_reasonable(cur):
+            self.get_logger().warn(
+                f"Drop {source} sample: absurd or non-finite state "
+                f"pos=({cur.x:.3f},{cur.y:.3f},{cur.z:.3f}) "
+                f"vel=({cur.vx:.3f},{cur.vy:.3f},{cur.vz:.3f})",
+                throttle_duration_sec=2.0,
+            )
+            if source == "IEKF":
+                self._invalidate_alignment("invalid IEKF sample")
+            return False
+        if prev is not None and self._pose_jump_too_large(prev, cur):
+            pos_jump = math.sqrt((cur.x - prev.x) ** 2 + (cur.y - prev.y) ** 2 + (cur.z - prev.z) ** 2)
+            vel_jump = math.sqrt((cur.vx - prev.vx) ** 2 + (cur.vy - prev.vy) ** 2 + (cur.vz - prev.vz) ** 2)
+            self.get_logger().warn(
+                f"Drop {source} jump sample: pos_jump={pos_jump:.3f} m, vel_jump={vel_jump:.3f} m/s",
+                throttle_duration_sec=2.0,
+            )
+            if source == "IEKF":
+                self._invalidate_alignment("IEKF jump sample")
+            return False
+        return True
 
     def _compute_metrics(self, ekf2: PoseData, iekf: PoseData) -> ComparisonMetrics:
         """计算对比指标"""

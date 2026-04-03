@@ -8,6 +8,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSHistoryPolicy, QoSReliabilityPolicy
 from geometry_msgs.msg import Vector3Stamped, PoseStamped
 from nav_msgs.msg import Path
+from std_msgs.msg import UInt32
 import math
 from mavros_msgs.msg import State
 
@@ -35,8 +36,20 @@ class IEKFAlignedPathPublisher(Node):
         self.clear_on_arm_transition = bool(
             self.declare_parameter("clear_on_arm_transition", True).value
         )
+        self.clear_on_reset_event = bool(
+            self.declare_parameter("clear_on_reset_event", False).value
+        )
+        self.max_abs_position_m = float(
+            self.declare_parameter("max_abs_position_m", 10000.0).value
+        )
+        self.max_jump_distance_m = float(
+            self.declare_parameter("max_jump_distance_m", 50.0).value
+        )
         self.mavros_state_topic = str(
             self.declare_parameter("mavros_state_topic", "/mavros/state").value
+        )
+        self.reset_event_topic = str(
+            self.declare_parameter("reset_event_topic", "/kf_gins/reset_event").value
         )
 
         qos_sub = QoSProfile(
@@ -76,20 +89,60 @@ class IEKFAlignedPathPublisher(Node):
                 self._on_state,
                 qos_state,
             )
+        else:
+            qos_state = QoSProfile(
+                depth=10,
+                history=QoSHistoryPolicy.KEEP_LAST,
+                reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            )
+        self.reset_sub = self.create_subscription(
+            UInt32,
+            self.reset_event_topic,
+            self._on_reset_event,
+            qos_state,
+        )
 
         self.get_logger().info("IEKF Aligned Path Publisher 已启动")
         self.get_logger().info(f"订阅话题: {self.input_topic}")
         self.get_logger().info(f"发布话题: {self.output_topic}")
+        self.get_logger().info(
+            f"门控: require_armed={self.require_armed}, "
+            f"max_abs_position_m={self.max_abs_position_m:.1f}, "
+            f"max_jump_distance_m={self.max_jump_distance_m:.1f}, "
+            f"clear_on_reset_event={self.clear_on_reset_event}"
+        )
+
+    def _clear_path(self):
+        self.path = Path()
+        self.path.header.frame_id = self.frame_id
+        self.last_pos = None
+        self.path.header.stamp = self.get_clock().now().to_msg()
+        self.pub.publish(self.path)
+
+    def _restart_segment(self):
+        # Preserve existing history but let the next aligned point start a new segment.
+        self.last_pos = None
 
     def _on_state(self, msg: State):
         prev = self.mavros_armed
         self.mavros_armed = bool(msg.armed)
         self.have_mavros_state = True
         if self.clear_on_arm_transition and prev != self.mavros_armed:
-            self.path.poses.clear()
-            self.last_pos = None
-            self.path.header.stamp = self.get_clock().now().to_msg()
-            self.pub.publish(self.path)
+            self._clear_path()
+
+    def _on_reset_event(self, msg: UInt32):
+        if self.clear_on_reset_event:
+            self.get_logger().warn(
+                f"IEKF reset event #{msg.data}: clearing aligned path due to clear_on_reset_event=true.",
+                throttle_duration_sec=1.0,
+            )
+            self._clear_path()
+            return
+        self.get_logger().warn(
+            f"IEKF reset event #{msg.data}: preserving aligned path history and restarting segment accumulation.",
+            throttle_duration_sec=1.0,
+        )
+        self._restart_segment()
 
     def vec_callback(self, msg: Vector3Stamped):
         if self.require_armed:
@@ -98,11 +151,30 @@ class IEKFAlignedPathPublisher(Node):
             if not self.mavros_armed:
                 return
         pos = msg.vector
+        vals = [pos.x, pos.y, pos.z]
+        if not all(math.isfinite(v) for v in vals):
+            self.get_logger().warn(
+                "Skip aligned path point: non-finite position.",
+                throttle_duration_sec=2.0,
+            )
+            return
+        if max(abs(pos.x), abs(pos.y), abs(pos.z)) > self.max_abs_position_m:
+            self.get_logger().warn(
+                f"Skip aligned path point: absurd position=({pos.x:.3f},{pos.y:.3f},{pos.z:.3f}).",
+                throttle_duration_sec=2.0,
+            )
+            return
         if self.last_pos:
             dx = pos.x - self.last_pos[0]
             dy = pos.y - self.last_pos[1]
             dz = pos.z - self.last_pos[2]
             dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if dist > self.max_jump_distance_m:
+                self.get_logger().warn(
+                    f"Skip aligned path jump: dist={dist:.3f} m exceeds {self.max_jump_distance_m:.3f} m.",
+                    throttle_duration_sec=2.0,
+                )
+                return
             if dist < self.min_distance:
                 return
 
