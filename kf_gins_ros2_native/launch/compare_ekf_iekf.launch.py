@@ -347,7 +347,7 @@ def generate_launch_description():
             'min_distance': 0.05,
             'require_armed': True,
             'clear_on_arm_transition': False,
-            'clear_on_reset_event': False,
+            'clear_on_reset_event': True,
             'mavros_state_topic': LaunchConfiguration('mavros_state_topic'),
             'startup_ignore_sec': 3.0,
             'max_abs_position_m': 10000.0,
@@ -463,7 +463,7 @@ def generate_launch_description():
             'max_path_length': 20000,
             'require_armed': LaunchConfiguration('aligned_path_require_armed'),
             'clear_on_arm_transition': False,
-            'clear_on_reset_event': False,
+            'clear_on_reset_event': True,
             'mavros_state_topic': LaunchConfiguration('mavros_state_topic'),
         }],
         condition=IfCondition(LaunchConfiguration('enable_real_time_comparison'))

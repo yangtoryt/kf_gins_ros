@@ -25,6 +25,7 @@ kf_gins_node:
     heading_update_max_age_sec: 0.5
     heading_update_innovation_gate_deg: 45.0
     heading_update_armed_innovation_gate_deg: 8.0
+    heading_update_turn_innovation_gate_deg: 60.0
     heading_update_max_source_yaw_rate_deg_s: 15.0
     heading_update_source_jump_gate_deg: 20.0
     heading_update_source_jump_block_sec: 2.0
