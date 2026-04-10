@@ -110,6 +110,18 @@ def generate_launch_description():
         'mavros_imu_topic', default_value='/mavros/imu/data_raw',
         description='MAVROS IMU topic (default: /mavros/imu/data_raw)'
     )
+    imu_source = DeclareLaunchArgument(
+        'imu_source', default_value='mavros_raw',
+        description='IMU source for KF-GINS: mavros_raw, px4_sensor_combined, or px4_vehicle_imu'
+    )
+    px4_sensor_combined_topic = DeclareLaunchArgument(
+        'px4_sensor_combined_topic', default_value='/fmu/out/sensor_combined',
+        description='PX4 DDS SensorCombined topic'
+    )
+    px4_vehicle_imu_topic = DeclareLaunchArgument(
+        'px4_vehicle_imu_topic', default_value='/fmu/out/vehicle_imu',
+        description='PX4 DDS VehicleImu topic'
+    )
     mavros_gps_topic = DeclareLaunchArgument(
         'mavros_gps_topic', default_value='/mavros/global_position/raw/fix',
         description='MAVROS GNSS topic (default: /mavros/global_position/raw/fix)'
@@ -401,7 +413,10 @@ def generate_launch_description():
         parameters=[
             kf_gins_config,
             {
+                'imu_source': LaunchConfiguration('imu_source'),
                 'imu_topic': LaunchConfiguration('mavros_imu_topic'),
+                'px4_sensor_combined_topic': LaunchConfiguration('px4_sensor_combined_topic'),
+                'px4_vehicle_imu_topic': LaunchConfiguration('px4_vehicle_imu_topic'),
                 'gnss_topic': '/gps/fix',
                 'config_file': LaunchConfiguration('kf_gins_core_config_file'),
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
@@ -601,6 +616,9 @@ def generate_launch_description():
         imu_use_node_stamp,
         enable_imu_converter,
         mavros_imu_topic,
+        imu_source,
+        px4_sensor_combined_topic,
+        px4_vehicle_imu_topic,
         mavros_gps_topic,
         mavros_local_pose_topic,
         mavros_local_velocity_topic,

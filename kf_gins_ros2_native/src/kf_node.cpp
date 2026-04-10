@@ -1,4 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
+#include <px4_msgs/msg/sensor_combined.hpp>
+#include <px4_msgs/msg/vehicle_imu.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <sensor_msgs/msg/nav_sat_status.hpp>
@@ -41,10 +43,17 @@ public:
     map_frame_    = this->declare_parameter<std::string>("map_frame", "map");
     base_frame_   = this->declare_parameter<std::string>("base_frame", "base_link");
     odom_frame_   = this->declare_parameter<std::string>("odom_frame", "odom");
+    imu_source_   = this->declare_parameter<std::string>("imu_source", "mavros_raw");
     imu_topic_    = this->declare_parameter<std::string>("imu_topic", "/mavros/imu/data_raw");
+    px4_sensor_combined_topic_ =
+      this->declare_parameter<std::string>("px4_sensor_combined_topic", "/fmu/out/sensor_combined");
+    px4_vehicle_imu_topic_ =
+      this->declare_parameter<std::string>("px4_vehicle_imu_topic", "/fmu/out/vehicle_imu");
     gnss_topic_   = this->declare_parameter<std::string>("gnss_topic", "/gps/fix");
     imu_is_delta_ = this->declare_parameter<bool>("imu_is_delta", false);
     imu_input_is_flu_ = this->declare_parameter<bool>("imu_input_is_flu", true);
+    use_source_dt_for_px4_imu_ =
+      this->declare_parameter<bool>("use_source_dt_for_px4_imu", true);
     imu_gap_warn_ms_ = this->declare_parameter<double>("imu_gap_warn_ms", 60.0);
 
     // 时间与鲁棒性：MAVROS 可能发生时间跳变；用 node clock（可为 /clock）能更稳定
@@ -134,6 +143,38 @@ public:
       this->declare_parameter<double>("heading_update_source_jump_gate_deg", 20.0);
     heading_update_source_jump_block_sec_ =
       this->declare_parameter<double>("heading_update_source_jump_block_sec", 2.0);
+    heading_update_hard_innovation_gate_deg_ =
+      this->declare_parameter<double>("heading_update_hard_innovation_gate_deg", 15.0);
+    heading_post_turn_reacquire_enable_ =
+      this->declare_parameter<bool>("heading_post_turn_reacquire_enable", true);
+    heading_post_turn_reacquire_window_sec_ =
+      this->declare_parameter<double>("heading_post_turn_reacquire_window_sec", 2.0);
+    heading_post_turn_reacquire_max_residual_deg_ =
+      this->declare_parameter<double>("heading_post_turn_reacquire_max_residual_deg", 45.0);
+    heading_post_turn_reacquire_std_deg_ =
+      this->declare_parameter<double>("heading_post_turn_reacquire_std_deg", 7.0);
+    heading_recovery_enable_ =
+      this->declare_parameter<bool>("heading_recovery_enable", true);
+    heading_recovery_min_residual_deg_ =
+      this->declare_parameter<double>("heading_recovery_min_residual_deg", 15.0);
+    heading_recovery_max_residual_deg_ =
+      this->declare_parameter<double>("heading_recovery_max_residual_deg", 80.0);
+    heading_recovery_max_step_deg_ =
+      this->declare_parameter<double>("heading_recovery_max_step_deg", 3.0);
+    heading_recovery_std_deg_ =
+      this->declare_parameter<double>("heading_recovery_std_deg", 10.0);
+    heading_recovery_max_rate_hz_ =
+      this->declare_parameter<double>("heading_recovery_max_rate_hz", 2.0);
+    heading_recovery_max_gyro_deg_s_ =
+      this->declare_parameter<double>("heading_recovery_max_gyro_deg_s", 2.0);
+    heading_recovery_max_source_yaw_rate_deg_s_ =
+      this->declare_parameter<double>("heading_recovery_max_source_yaw_rate_deg_s", 2.0);
+    heading_recovery_max_horizontal_speed_mps_ =
+      this->declare_parameter<double>("heading_recovery_max_horizontal_speed_mps", 0.5);
+    heading_recovery_max_vertical_speed_mps_ =
+      this->declare_parameter<double>("heading_recovery_max_vertical_speed_mps", 2.0);
+    heading_recovery_min_consecutive_skips_ =
+      this->declare_parameter<int>("heading_recovery_min_consecutive_skips", 2);
     heading_update_low_speed_thresh_mps_ =
       this->declare_parameter<double>("heading_update_low_speed_thresh_mps", 2.0);
     heading_update_armed_min_horizontal_speed_mps_ =
@@ -210,8 +251,28 @@ public:
     }
 
     auto imu_qos = rclcpp::SensorDataQoS().keep_last(200);
-    imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-      imu_topic_, imu_qos, std::bind(&KFGinsNativeNode::imuCb, this, _1));
+    if (imu_source_ == "mavros_raw") {
+      active_imu_topic_name_ = imu_topic_;
+      imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+        imu_topic_, imu_qos, std::bind(&KFGinsNativeNode::imuCb, this, _1));
+    } else if (imu_source_ == "px4_sensor_combined") {
+      active_imu_topic_name_ = px4_sensor_combined_topic_;
+      if (imu_is_delta_) {
+        RCLCPP_WARN(
+          get_logger(),
+          "imu_source=px4_sensor_combined publishes averaged rates/accelerations, forcing imu_is_delta=false semantics at runtime.");
+      }
+      px4_sensor_combined_sub_ = this->create_subscription<px4_msgs::msg::SensorCombined>(
+        px4_sensor_combined_topic_, imu_qos,
+        std::bind(&KFGinsNativeNode::px4SensorCombinedCb, this, _1));
+    } else if (imu_source_ == "px4_vehicle_imu") {
+      active_imu_topic_name_ = px4_vehicle_imu_topic_;
+      px4_vehicle_imu_sub_ = this->create_subscription<px4_msgs::msg::VehicleImu>(
+        px4_vehicle_imu_topic_, imu_qos,
+        std::bind(&KFGinsNativeNode::px4VehicleImuCb, this, _1));
+    } else {
+      throw std::runtime_error("Unsupported imu_source: " + imu_source_);
+    }
 
     auto gnss_qos = rclcpp::QoS(rclcpp::KeepLast(10)).reliable().durability_volatile();
     gnss_sub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
@@ -297,7 +358,7 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "IMU time settings: topic=%s, input_is_flu=%s, use_node_time_for_core=%s, "
+      "IMU time settings: source=%s, topic=%s, input_is_flu=%s, use_node_time_for_core=%s, "
       "use_integrated_time_for_core=%s, use_steady_time_for_imu_dt=%s, "
       "max_imu_dt_sec=%.3f, skip_medium_imu_gap_when_turning=%s, imu_gap_turn_rate_gate_deg_s=%.2f, "
       "imu_gap_vertical_speed_gate_mps=%.2f, imu_gap_accel_deviation_gate_mps2=%.2f, "
@@ -305,7 +366,8 @@ public:
       "skip_large_imu_gap_samples=%s, severe_imu_gap_reset_sec=%.3f, "
       "mavros_velocity_topic=%s, heading_horiz_min=%.2f, heading_vert_max=%.2f, "
       "heading_src_yaw_rate_max=%.2f deg/s, publish_max_core_gnss_diff_m=%.2f",
-      imu_topic_.c_str(),
+      imu_source_.c_str(),
+      active_imu_topic_name_.c_str(),
       imu_input_is_flu_ ? "true" : "false",
       use_node_time_for_core_ ? "true" : "false",
       use_integrated_time_for_core_ ? "true" : "false",
@@ -327,6 +389,18 @@ public:
   }
 
 private:
+  struct ImuSample
+  {
+    double source_stamp_sec{std::numeric_limits<double>::quiet_NaN()};
+    double sample_dt_sec{std::numeric_limits<double>::quiet_NaN()};
+    double angular_dt_sec{std::numeric_limits<double>::quiet_NaN()};
+    double linear_dt_sec{std::numeric_limits<double>::quiet_NaN()};
+    Eigen::Vector3d angular{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d linear{Eigen::Vector3d::Zero()};
+    bool data_is_delta{false};
+    bool input_is_flu{false};
+  };
+
   void clearPath_(const char* reason)
   {
     (void)reason;
@@ -346,7 +420,11 @@ private:
 
     if (prev_armed != mavros_armed_) {
       last_disarmed_yaw_lock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+      last_heading_attempt_time_sec_ = std::numeric_limits<double>::quiet_NaN();
       last_heading_update_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+      last_heading_recovery_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+      last_turning_heading_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+      heading_large_residual_skip_count_ = 0;
     }
 
     if (clear_path_on_arm_transition_ && prev_armed != mavros_armed_) {
@@ -381,6 +459,11 @@ private:
   double selectYawForCoreReset_(const char** source) const
   {
     if (source != nullptr) *source = "zero";
+
+    if (prefer_preserved_yaw_on_next_core_reset_ && have_mavros_heading_) {
+      if (source != nullptr) *source = "mavros_after_reset_disable_preserved";
+      return mavros_heading_ned_deg_;
+    }
 
     if (prefer_preserved_yaw_on_next_core_reset_ &&
         std::isfinite(last_trusted_core_yaw_deg_)) {
@@ -436,7 +519,7 @@ private:
     const double warn_gap_sec = std::max(0.001, imu_gap_warn_ms_ * 1e-3);
 
     double input_dt_sec = std::numeric_limits<double>::quiet_NaN();
-    if (std::isfinite(last_imu_input_stamp_sec_)) {
+    if (std::isfinite(input_stamp_sec) && std::isfinite(last_imu_input_stamp_sec_)) {
       input_dt_sec = input_stamp_sec - last_imu_input_stamp_sec_;
     }
     last_imu_input_stamp_sec_ = input_stamp_sec;
@@ -455,7 +538,7 @@ private:
         "Raw IMU gap: input_dt=%.2fms recv_dt=%.2fms topic=%s",
         std::isfinite(input_dt_sec) ? input_dt_sec * 1000.0 : -1.0,
         std::isfinite(recv_dt_sec) ? recv_dt_sec * 1000.0 : -1.0,
-        imu_topic_.c_str());
+        active_imu_topic_name_.c_str());
     }
   }
 
@@ -481,7 +564,11 @@ private:
     last_gnss_time_sec_ = -std::numeric_limits<double>::infinity();
     have_prev_gnss_for_vel_ = false;
     last_zupt_reset_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    last_heading_attempt_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     last_heading_update_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    last_heading_recovery_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    last_turning_heading_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    heading_large_residual_skip_count_ = 0;
 
     publishResetEvent_("disarmed yaw lock");
     clearPath_("disarmed yaw lock");
@@ -529,7 +616,11 @@ private:
     have_origin_rebuild_candidate_ = false;
     origin_rebuild_candidate_count_ = 0;
     have_prev_gnss_for_vel_ = false;
+    last_heading_attempt_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     last_heading_update_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    last_heading_recovery_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    last_turning_heading_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    heading_large_residual_skip_count_ = 0;
 
     if (had_origin) {
       RCLCPP_WARN(
@@ -647,8 +738,8 @@ private:
 
     const double min_period_sec =
       heading_update_max_rate_hz_ > 0.0 ? 1.0 / heading_update_max_rate_hz_ : 0.0;
-    if (std::isfinite(last_heading_update_time_sec_) &&
-        (now_sec - last_heading_update_time_sec_) < min_period_sec) {
+    if (std::isfinite(last_heading_attempt_time_sec_) &&
+        (now_sec - last_heading_attempt_time_sec_) < min_period_sec) {
       return;
     }
 
@@ -703,8 +794,10 @@ private:
       return;
     }
 
+    const double core_yaw_before_deg = st.yaw_deg;
+    const double raw_heading_deg = mavros_heading_ned_deg_;
     const double yaw_residual_deg =
-      shortestAngleDiffDeg_(mavros_heading_ned_deg_, st.yaw_deg);
+      shortestAngleDiffDeg_(raw_heading_deg, core_yaw_before_deg);
     if (mavros_armed_ &&
         std::isfinite(last_large_mavros_heading_jump_time_sec_) &&
         heading_update_source_jump_block_sec_ > 0.0 &&
@@ -725,6 +818,7 @@ private:
         last_mavros_heading_rate_deg_s_, heading_update_max_source_yaw_rate_deg_s_);
       return;
     }
+    last_heading_attempt_time_sec_ = now_sec;
     double innovation_gate_deg =
       (mavros_armed_ &&
        std::isfinite(heading_update_armed_innovation_gate_deg_) &&
@@ -736,31 +830,195 @@ private:
       std::isfinite(imu_gap_turn_rate_gate_deg_s_) &&
       imu_gap_turn_rate_gate_deg_s_ > 0.0 &&
       last_imu_gyro_norm_deg_s_ >= imu_gap_turn_rate_gate_deg_s_;
+    if (turning_now) {
+      last_turning_heading_time_sec_ = now_sec;
+    }
+    const bool recent_turning =
+      heading_post_turn_reacquire_enable_ &&
+      mavros_armed_ &&
+      !turning_now &&
+      std::isfinite(last_turning_heading_time_sec_) &&
+      heading_post_turn_reacquire_window_sec_ > 0.0 &&
+      (now_sec - last_turning_heading_time_sec_) <= heading_post_turn_reacquire_window_sec_;
     if (mavros_armed_ && turning_now &&
         std::isfinite(heading_update_turn_innovation_gate_deg_) &&
         heading_update_turn_innovation_gate_deg_ > 0.0) {
       innovation_gate_deg =
         std::max(innovation_gate_deg, heading_update_turn_innovation_gate_deg_);
+    } else if (recent_turning &&
+               std::isfinite(heading_update_turn_innovation_gate_deg_) &&
+               heading_update_turn_innovation_gate_deg_ > 0.0) {
+      innovation_gate_deg =
+        std::max(innovation_gate_deg, heading_update_turn_innovation_gate_deg_);
     }
     if (std::isfinite(innovation_gate_deg) &&
         innovation_gate_deg > 0.0 &&
-        std::abs(yaw_residual_deg) > innovation_gate_deg) {
-      RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 1000,
-        "Skip heading update: innovation %.2f deg exceeds gate %.2f deg",
-        yaw_residual_deg, innovation_gate_deg);
-      return;
+        std::isfinite(heading_update_hard_innovation_gate_deg_) &&
+        heading_update_hard_innovation_gate_deg_ > 0.0) {
+      innovation_gate_deg = std::min(innovation_gate_deg, heading_update_hard_innovation_gate_deg_);
     }
 
-    if (!core_->ingestHeading(t_sec, mavros_heading_ned_deg_, heading_update_std_deg_)) {
+    const double residual_abs_deg = std::abs(yaw_residual_deg);
+    double heading_measurement_deg = raw_heading_deg;
+    double heading_measurement_std_deg = heading_update_std_deg_;
+    bool recovery_update = false;
+    bool post_turn_reacquire_update = false;
+    const char* heading_mode = "update";
+
+    if (std::isfinite(innovation_gate_deg) &&
+        innovation_gate_deg > 0.0 &&
+        residual_abs_deg > innovation_gate_deg) {
+      heading_large_residual_skip_count_++;
+
+      const bool recovery_residual_ok =
+        heading_recovery_enable_ &&
+        residual_abs_deg >= std::max(0.0, heading_recovery_min_residual_deg_) &&
+        (heading_recovery_max_residual_deg_ <= 0.0 ||
+         residual_abs_deg <= heading_recovery_max_residual_deg_);
+      const bool recovery_gyro_ok =
+        !std::isfinite(last_imu_gyro_norm_deg_s_) ||
+        heading_recovery_max_gyro_deg_s_ <= 0.0 ||
+        last_imu_gyro_norm_deg_s_ <= heading_recovery_max_gyro_deg_s_;
+      const bool recovery_source_rate_ok =
+        !std::isfinite(last_mavros_heading_rate_deg_s_) ||
+        heading_recovery_max_source_yaw_rate_deg_s_ <= 0.0 ||
+        std::abs(last_mavros_heading_rate_deg_s_) <= heading_recovery_max_source_yaw_rate_deg_s_;
+      const bool recovery_speed_ok =
+        have_fresh_mavros_speed &&
+        (heading_recovery_max_horizontal_speed_mps_ <= 0.0 ||
+         last_mavros_horizontal_speed_mps_ <= heading_recovery_max_horizontal_speed_mps_) &&
+        (heading_recovery_max_vertical_speed_mps_ <= 0.0 ||
+         last_mavros_vertical_speed_mps_ <= heading_recovery_max_vertical_speed_mps_);
+      const int min_recovery_skips =
+        std::max(1, heading_recovery_min_consecutive_skips_);
+      const bool recovery_count_ok =
+        heading_large_residual_skip_count_ >= min_recovery_skips;
+      const double recovery_min_period_sec =
+        heading_recovery_max_rate_hz_ > 0.0 ? 1.0 / heading_recovery_max_rate_hz_ : 0.0;
+      const bool recovery_rate_ok =
+        !std::isfinite(last_heading_recovery_time_sec_) ||
+        (now_sec - last_heading_recovery_time_sec_) >= recovery_min_period_sec;
+
+      const bool post_turn_reacquire_residual_ok =
+        recent_turning &&
+        residual_abs_deg > innovation_gate_deg &&
+        (heading_post_turn_reacquire_max_residual_deg_ <= 0.0 ||
+         residual_abs_deg <= heading_post_turn_reacquire_max_residual_deg_);
+
+      if (post_turn_reacquire_residual_ok && recovery_gyro_ok &&
+          recovery_source_rate_ok && recovery_speed_ok && recovery_count_ok &&
+          recovery_rate_ok) {
+        heading_measurement_deg = raw_heading_deg;
+        heading_measurement_std_deg =
+          std::max(heading_update_std_deg_, heading_post_turn_reacquire_std_deg_);
+        post_turn_reacquire_update = true;
+        heading_mode = "post_turn_reacquire";
+      } else if (recovery_residual_ok && !turning_now && recovery_gyro_ok &&
+          recovery_source_rate_ok && recovery_speed_ok && recovery_count_ok &&
+          recovery_rate_ok) {
+        const double recovery_step_deg =
+          std::copysign(
+            std::min(residual_abs_deg, std::max(0.1, heading_recovery_max_step_deg_)),
+            yaw_residual_deg);
+        heading_measurement_deg = normalizeAngleDeg_(core_yaw_before_deg + recovery_step_deg);
+        heading_measurement_std_deg =
+          std::max(heading_update_std_deg_, heading_recovery_std_deg_);
+        recovery_update = true;
+        heading_mode = "recovery";
+      } else {
+        RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 1000,
+          "Skip heading update: innovation %.2f deg exceeds gate %.2f deg "
+          "(core_yaw=%.2f deg, raw_heading=%.2f deg, armed=%s, turning=%s, recent_turning=%s, "
+          "gyro=%.2f deg/s, speed=%.2f m/s, horiz=%.2f m/s, vert=%.2f m/s, "
+          "source_yaw_rate=%.2f deg/s, mode=%s, count=%d)",
+          yaw_residual_deg, innovation_gate_deg,
+          core_yaw_before_deg, raw_heading_deg,
+          mavros_armed_ ? "true" : "false",
+          turning_now ? "true" : "false",
+          recent_turning ? "true" : "false",
+          last_imu_gyro_norm_deg_s_,
+          last_mavros_speed_mps_,
+          last_mavros_horizontal_speed_mps_,
+          last_mavros_vertical_speed_mps_,
+          last_mavros_heading_rate_deg_s_,
+          recent_turning ? "post_turn_blocked" :
+          (heading_recovery_enable_ ? "recovery_blocked" : "disabled"),
+          heading_large_residual_skip_count_);
+        return;
+      }
+    } else {
+      heading_large_residual_skip_count_ = 0;
+    }
+
+    if (!core_->ingestHeading(t_sec, heading_measurement_deg, heading_measurement_std_deg)) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "core_->ingestHeading() failed");
       return;
     }
 
+    const auto st_after = core_->current();
+    const double core_yaw_after_deg = st_after.yaw_deg;
+
+    if (post_turn_reacquire_update) {
+      last_heading_recovery_time_sec_ = now_sec;
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 1000,
+        "Applied post-turn heading reacquire: residual=%.2f deg core_yaw_before=%.2f deg "
+        "raw_heading=%.2f deg measurement_heading=%.2f deg std=%.2f deg "
+        "(gate=%.2f deg, armed=%s, gyro=%.2f deg/s, horiz=%.2f m/s, vert=%.2f m/s, "
+        "source_yaw_rate=%.2f deg/s, recent_turning=%s, core_yaw_after=%.2f deg, count=%d)",
+        yaw_residual_deg, core_yaw_before_deg, raw_heading_deg,
+        heading_measurement_deg, heading_measurement_std_deg,
+        innovation_gate_deg,
+        mavros_armed_ ? "true" : "false",
+        last_imu_gyro_norm_deg_s_,
+        last_mavros_horizontal_speed_mps_,
+        last_mavros_vertical_speed_mps_,
+        last_mavros_heading_rate_deg_s_,
+        recent_turning ? "true" : "false",
+        core_yaw_after_deg,
+        heading_large_residual_skip_count_);
+    } else if (recovery_update) {
+      last_heading_recovery_time_sec_ = now_sec;
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 1000,
+        "Applied heading recovery: residual=%.2f deg core_yaw_before=%.2f deg raw_heading=%.2f deg "
+        "measurement_heading=%.2f deg std=%.2f deg "
+        "(gate=%.2f deg, step_limit=%.2f deg, armed=%s, gyro=%.2f deg/s, "
+        "horiz=%.2f m/s, vert=%.2f m/s, source_yaw_rate=%.2f deg/s, recent_turning=%s, "
+        "core_yaw_after=%.2f deg, count=%d)",
+        yaw_residual_deg, core_yaw_before_deg, raw_heading_deg,
+        heading_measurement_deg, heading_measurement_std_deg,
+        innovation_gate_deg, heading_recovery_max_step_deg_,
+        mavros_armed_ ? "true" : "false",
+        last_imu_gyro_norm_deg_s_,
+        last_mavros_horizontal_speed_mps_,
+        last_mavros_vertical_speed_mps_,
+        last_mavros_heading_rate_deg_s_,
+        recent_turning ? "true" : "false",
+        core_yaw_after_deg,
+        heading_large_residual_skip_count_);
+    }
+
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
-      "Applied heading update: residual=%.2f deg heading=%.2f deg std=%.2f deg",
-      yaw_residual_deg, mavros_heading_ned_deg_, heading_update_std_deg_);
+      "Applied heading %s: residual=%.2f deg core_yaw_before=%.2f deg raw_heading=%.2f deg "
+      "measurement_heading=%.2f deg std=%.2f deg "
+      "(gate=%.2f deg, armed=%s, turning=%s, recent_turning=%s, gyro=%.2f deg/s, speed=%.2f m/s, "
+      "horiz=%.2f m/s, vert=%.2f m/s, source_yaw_rate=%.2f deg/s, core_yaw_after=%.2f deg)",
+      heading_mode,
+      yaw_residual_deg, core_yaw_before_deg, raw_heading_deg,
+      heading_measurement_deg, heading_measurement_std_deg,
+      innovation_gate_deg,
+      mavros_armed_ ? "true" : "false",
+      turning_now ? "true" : "false",
+      recent_turning ? "true" : "false",
+      last_imu_gyro_norm_deg_s_,
+      last_mavros_speed_mps_,
+      last_mavros_horizontal_speed_mps_,
+      last_mavros_vertical_speed_mps_,
+      last_mavros_heading_rate_deg_s_,
+      core_yaw_after_deg);
 
     last_heading_update_time_sec_ = now_sec;
   }
@@ -770,7 +1028,91 @@ private:
   {
     const double raw_t = use_node_time_for_core_ ? rawTimeSecNow_() : rawTimeSecFromMsg_(msg->header.stamp);
     const rclcpp::Time steady_now = steady_clock_.now();
-    maybeReportImuGap_(rawTimeSecFromMsg_(msg->header.stamp), steady_now);
+    ImuSample sample;
+    sample.source_stamp_sec = rawTimeSecFromMsg_(msg->header.stamp);
+    sample.angular = Eigen::Vector3d(
+      msg->angular_velocity.x,
+      msg->angular_velocity.y,
+      msg->angular_velocity.z);
+    sample.linear = Eigen::Vector3d(
+      msg->linear_acceleration.x,
+      msg->linear_acceleration.y,
+      msg->linear_acceleration.z);
+    sample.data_is_delta = imu_is_delta_;
+    sample.input_is_flu = imu_input_is_flu_;
+    processImuSample_(sample, raw_t, steady_now);
+  }
+
+  void px4SensorCombinedCb(const px4_msgs::msg::SensorCombined::SharedPtr msg)
+  {
+    const rclcpp::Time steady_now = steady_clock_.now();
+    ImuSample sample;
+    sample.source_stamp_sec = static_cast<double>(msg->timestamp) * 1e-6;
+    const double gyro_dt_sec = static_cast<double>(msg->gyro_integral_dt) * 1e-6;
+    const double accel_dt_sec = static_cast<double>(msg->accelerometer_integral_dt) * 1e-6;
+    sample.angular_dt_sec = gyro_dt_sec;
+    sample.linear_dt_sec = accel_dt_sec;
+    if (use_source_dt_for_px4_imu_) {
+      if (gyro_dt_sec > 0.0 && accel_dt_sec > 0.0) {
+        sample.sample_dt_sec = std::max(gyro_dt_sec, accel_dt_sec);
+        if (std::abs(gyro_dt_sec - accel_dt_sec) > 5e-4) {
+          RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 2000,
+            "PX4 SensorCombined dt mismatch: gyro_dt=%.6f s accel_dt=%.6f s. Using %.6f s.",
+            gyro_dt_sec, accel_dt_sec, sample.sample_dt_sec);
+        }
+      } else if (gyro_dt_sec > 0.0) {
+        sample.sample_dt_sec = gyro_dt_sec;
+      } else if (accel_dt_sec > 0.0) {
+        sample.sample_dt_sec = accel_dt_sec;
+      }
+    }
+    sample.angular = Eigen::Vector3d(msg->gyro_rad[0], msg->gyro_rad[1], msg->gyro_rad[2]);
+    sample.linear = Eigen::Vector3d(
+      msg->accelerometer_m_s2[0],
+      msg->accelerometer_m_s2[1],
+      msg->accelerometer_m_s2[2]);
+    sample.data_is_delta = false;
+    sample.input_is_flu = false;  // PX4 DDS SensorCombined is already FRD.
+    processImuSample_(sample, rawTimeSecNow_(), steady_now);
+  }
+
+  void px4VehicleImuCb(const px4_msgs::msg::VehicleImu::SharedPtr msg)
+  {
+    const rclcpp::Time steady_now = steady_clock_.now();
+    ImuSample sample;
+    sample.source_stamp_sec = static_cast<double>(msg->timestamp_sample) * 1e-6;
+    const double delta_angle_dt_sec = static_cast<double>(msg->delta_angle_dt) * 1e-6;
+    const double delta_velocity_dt_sec = static_cast<double>(msg->delta_velocity_dt) * 1e-6;
+    sample.angular_dt_sec = delta_angle_dt_sec;
+    sample.linear_dt_sec = delta_velocity_dt_sec;
+    if (use_source_dt_for_px4_imu_) {
+      if (delta_angle_dt_sec > 0.0 && delta_velocity_dt_sec > 0.0) {
+        sample.sample_dt_sec = std::max(delta_angle_dt_sec, delta_velocity_dt_sec);
+        if (std::abs(delta_angle_dt_sec - delta_velocity_dt_sec) > 5e-4) {
+          RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 2000,
+            "PX4 VehicleImu dt mismatch: delta_angle_dt=%.6f s delta_velocity_dt=%.6f s. Using %.6f s.",
+            delta_angle_dt_sec, delta_velocity_dt_sec, sample.sample_dt_sec);
+        }
+      } else if (delta_angle_dt_sec > 0.0) {
+        sample.sample_dt_sec = delta_angle_dt_sec;
+      } else if (delta_velocity_dt_sec > 0.0) {
+        sample.sample_dt_sec = delta_velocity_dt_sec;
+      }
+    }
+    sample.angular = Eigen::Vector3d(
+      msg->delta_angle[0], msg->delta_angle[1], msg->delta_angle[2]);
+    sample.linear = Eigen::Vector3d(
+      msg->delta_velocity[0], msg->delta_velocity[1], msg->delta_velocity[2]);
+    sample.data_is_delta = true;
+    sample.input_is_flu = false;  // PX4 DDS VehicleImu is already FRD.
+    processImuSample_(sample, rawTimeSecNow_(), steady_now);
+  }
+
+  void processImuSample_(const ImuSample& sample, double raw_t, const rclcpp::Time& steady_now)
+  {
+    maybeReportImuGap_(sample.source_stamp_sec, steady_now);
 
     if (!have_prev_imu_) {
       prev_imu_time_ = raw_t;
@@ -786,7 +1128,8 @@ private:
     // 在线仿真中，core 的有效初值来自第一次 GNSS reset，而不是 YAML 里的离线初值。
     // 在首次 GNSS 之前只建立 IMU 时间基，不推进 mechanization，避免错误初值导致协方差炸裂。
     if (!core_initialized_) {
-      const bool use_raw_time_for_dt = !use_steady_time_for_imu_dt_;
+      const bool use_source_sample_dt = std::isfinite(sample.sample_dt_sec) && sample.sample_dt_sec > 0.0;
+      const bool use_raw_time_for_dt = !use_source_sample_dt && !use_steady_time_for_imu_dt_;
       if (use_raw_time_for_dt) {
         if (!have_raw_time_zero_) {
           raw_time_zero_sec_ = prev_imu_time_;
@@ -795,10 +1138,9 @@ private:
         }
         const double raw_rel = raw_t - raw_time_zero_sec_;
         prev_imu_raw_rel_sec_ = raw_rel;
-        prev_imu_time_ = raw_t;
-      } else {
-        prev_imu_steady_time_ = steady_now;
       }
+      prev_imu_time_ = raw_t;
+      prev_imu_steady_time_ = steady_now;
       core_time_sec_ = 0.0;
       last_core_time_ = -std::numeric_limits<double>::infinity();
       return;
@@ -806,8 +1148,13 @@ private:
 
     // 1) 计算 raw dt（保证 t 与 dt 使用同一时间基准）
     double dt_candidate = 0.0;
-    const bool use_raw_time_for_dt = !use_steady_time_for_imu_dt_;
-    if (use_raw_time_for_dt) {
+    const bool use_source_sample_dt = std::isfinite(sample.sample_dt_sec) && sample.sample_dt_sec > 0.0;
+    const bool use_raw_time_for_dt = !use_source_sample_dt && !use_steady_time_for_imu_dt_;
+    if (use_source_sample_dt) {
+      dt_candidate = sample.sample_dt_sec;
+      prev_imu_time_ = raw_t;
+      prev_imu_steady_time_ = steady_now;
+    } else if (use_raw_time_for_dt) {
       if (!have_raw_time_zero_) {
         raw_time_zero_sec_ = prev_imu_time_;
         have_raw_time_zero_ = true;
@@ -821,25 +1168,39 @@ private:
     } else {
       dt_candidate = (steady_now - prev_imu_steady_time_).seconds();
       prev_imu_steady_time_ = steady_now;
+      prev_imu_time_ = raw_t;
     }
 
     // 2) 时间跳变检测：/clock reset 或上游时间戳回退
-    if (auto_reset_on_time_jump_ && std::isfinite(dt_candidate) &&
-        dt_candidate < -time_jump_reset_threshold_sec_) {
+    if (auto_reset_on_time_jump_ && !use_source_sample_dt &&
+        std::isfinite(dt_candidate) && dt_candidate < -time_jump_reset_threshold_sec_) {
       resetFilterAndTimeBase_("time went backwards (large jump)");
       return;
     }
 
-    const double gyro_norm_rad_s = std::sqrt(
-      msg->angular_velocity.x * msg->angular_velocity.x +
-      msg->angular_velocity.y * msg->angular_velocity.y +
-      msg->angular_velocity.z * msg->angular_velocity.z);
+    const double gyro_aux_dt_sec =
+      std::isfinite(sample.angular_dt_sec) && sample.angular_dt_sec > 0.0
+        ? sample.angular_dt_sec
+        : dt_candidate;
+    const double accel_aux_dt_sec =
+      std::isfinite(sample.linear_dt_sec) && sample.linear_dt_sec > 0.0
+        ? sample.linear_dt_sec
+        : dt_candidate;
+    const Eigen::Vector3d aux_angular =
+      (sample.data_is_delta && std::isfinite(gyro_aux_dt_sec) && gyro_aux_dt_sec > 0.0)
+        ? (sample.angular / gyro_aux_dt_sec)
+        : (sample.data_is_delta ? Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN())
+                                : sample.angular);
+    const Eigen::Vector3d aux_linear =
+      (sample.data_is_delta && std::isfinite(accel_aux_dt_sec) && accel_aux_dt_sec > 0.0)
+        ? (sample.linear / accel_aux_dt_sec)
+        : (sample.data_is_delta ? Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN())
+                                : sample.linear);
+
+    const double gyro_norm_rad_s = aux_angular.norm();
     const double gyro_norm_deg_s = gyro_norm_rad_s * 180.0 / M_PI;
     last_imu_gyro_norm_deg_s_ = gyro_norm_deg_s;
-    const double accel_norm_mps2 = std::sqrt(
-      msg->linear_acceleration.x * msg->linear_acceleration.x +
-      msg->linear_acceleration.y * msg->linear_acceleration.y +
-      msg->linear_acceleration.z * msg->linear_acceleration.z);
+    const double accel_norm_mps2 = aux_linear.norm();
     const double accel_deviation_mps2 = std::abs(accel_norm_mps2 - 9.81);
     const bool maneuver_turn_rate_triggered =
       std::isfinite(imu_gap_turn_rate_gate_deg_s_) &&
@@ -935,20 +1296,12 @@ private:
       imu_dt_estimate_sec_ = 0.80 * imu_dt_estimate_sec_ + 0.20 * dt;
     }
 
-    Eigen::Vector3d dtheta, dvel;
-    if (imu_is_delta_) {
-      dtheta = {msg->angular_velocity.x,   msg->angular_velocity.y,   msg->angular_velocity.z};
-      dvel   = {msg->linear_acceleration.x,msg->linear_acceleration.y,msg->linear_acceleration.z};
-    } else {
-      // kf_gins_adapter 会在 imu_is_delta=false 时将“角速度/比力”乘以 dt 转为增量。
-      // 这里传入原始角速度(rad/s)与比力(m/s^2)，避免重复乘 dt 导致 dt^2 的数值错误。
-      dtheta = {msg->angular_velocity.x,   msg->angular_velocity.y,   msg->angular_velocity.z};
-      dvel   = {msg->linear_acceleration.x,msg->linear_acceleration.y,msg->linear_acceleration.z};
-    }
+    Eigen::Vector3d dtheta = sample.angular;
+    Eigen::Vector3d dvel = sample.linear;
 
     // MAVROS 原始 IMU 采用机体 FLU 坐标系，而 KF-GINS 采用机体 FRD 坐标系，因此需在处理过程中进行转换。
     // 将 Python 转换器从主估算链中移除。
-    if (imu_input_is_flu_) {
+    if (sample.input_is_flu) {
       dtheta.y() = -dtheta.y();
       dtheta.z() = -dtheta.z();
       dvel.y() = -dvel.y();
@@ -963,8 +1316,8 @@ private:
     double final_t = std::numeric_limits<double>::quiet_NaN();
     const int propagation_steps = use_segmented_propagation ? segmented_propagation_steps : 1;
     const double dt_step = dt / static_cast<double>(propagation_steps);
-    const Eigen::Vector3d dtheta_step = imu_is_delta_ ? (dtheta / propagation_steps) : dtheta;
-    const Eigen::Vector3d dvel_step = imu_is_delta_ ? (dvel / propagation_steps) : dvel;
+    const Eigen::Vector3d dtheta_step = sample.data_is_delta ? (dtheta / propagation_steps) : dtheta;
+    const Eigen::Vector3d dvel_step = sample.data_is_delta ? (dvel / propagation_steps) : dvel;
 
     for (int step = 0; step < propagation_steps; ++step) {
       //  生成送入 core 的时间戳：推荐用 dt 积分出的单调时间轴
@@ -982,7 +1335,7 @@ private:
         }
       }
 
-      if (!core_->ingestImu(t, dtheta_step, dvel_step, dt_step, imu_is_delta_)) {
+      if (!core_->ingestImu(t, dtheta_step, dvel_step, dt_step, sample.data_is_delta)) {
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "core_->ingestImu() failed");
         return;
       }
@@ -1420,9 +1773,12 @@ private:
 
 private:
   // ---- params / topics ----
-  std::string config_path_, map_frame_, base_frame_, odom_frame_, imu_topic_, gnss_topic_;
+  std::string config_path_, map_frame_, base_frame_, odom_frame_;
+  std::string imu_source_, imu_topic_, px4_sensor_combined_topic_, px4_vehicle_imu_topic_, gnss_topic_;
+  std::string active_imu_topic_name_;
   bool imu_is_delta_{false};
   bool imu_input_is_flu_{true};
+  bool use_source_dt_for_px4_imu_{true};
   double imu_gap_warn_ms_{60.0};
   double path_rate_hz_{5.0};
   int    pose_decimation_{10};
@@ -1500,6 +1856,22 @@ private:
   double heading_update_max_source_yaw_rate_deg_s_{15.0};
   double heading_update_source_jump_gate_deg_{20.0};
   double heading_update_source_jump_block_sec_{2.0};
+  double heading_update_hard_innovation_gate_deg_{15.0};
+  bool heading_post_turn_reacquire_enable_{true};
+  double heading_post_turn_reacquire_window_sec_{2.0};
+  double heading_post_turn_reacquire_max_residual_deg_{45.0};
+  double heading_post_turn_reacquire_std_deg_{7.0};
+  bool heading_recovery_enable_{true};
+  double heading_recovery_min_residual_deg_{15.0};
+  double heading_recovery_max_residual_deg_{80.0};
+  double heading_recovery_max_step_deg_{3.0};
+  double heading_recovery_std_deg_{10.0};
+  double heading_recovery_max_rate_hz_{2.0};
+  double heading_recovery_max_gyro_deg_s_{2.0};
+  double heading_recovery_max_source_yaw_rate_deg_s_{2.0};
+  double heading_recovery_max_horizontal_speed_mps_{0.5};
+  double heading_recovery_max_vertical_speed_mps_{2.0};
+  int heading_recovery_min_consecutive_skips_{2};
   double heading_update_low_speed_thresh_mps_{2.0};
   double heading_update_armed_min_horizontal_speed_mps_{0.0};
   double heading_update_max_vertical_speed_mps_{0.8};
@@ -1524,7 +1896,11 @@ private:
   double last_core_gnss_diff_m_{std::numeric_limits<double>::quiet_NaN()};
   bool prefer_preserved_yaw_on_next_core_reset_{false};
   bool last_gnss_has_fix_{true};
+  double last_heading_attempt_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_heading_update_time_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double last_heading_recovery_time_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double last_turning_heading_time_sec_{std::numeric_limits<double>::quiet_NaN()};
+  int heading_large_residual_skip_count_{0};
   double last_disarmed_yaw_lock_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_vertical_or_accel_trigger_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_imu_gyro_norm_deg_s_{std::numeric_limits<double>::quiet_NaN()};
@@ -1552,6 +1928,8 @@ private:
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  rclcpp::Subscription<px4_msgs::msg::SensorCombined>::SharedPtr px4_sensor_combined_sub_;
+  rclcpp::Subscription<px4_msgs::msg::VehicleImu>::SharedPtr px4_vehicle_imu_sub_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gnss_sub_;
   rclcpp::Subscription<mavros_msgs::msg::State>::SharedPtr mavros_state_sub_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr mavros_local_velocity_sub_;
