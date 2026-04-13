@@ -144,6 +144,15 @@ public:
     void headingUpdate();
 
     /**
+     * @brief 强制将当前 yaw 对齐到外部 heading，并重置 yaw 相关协方差
+     *        force current yaw to external heading and reopen yaw covariance
+     * @param [in] yaw_rad      heading in radians
+     * @param [in] yaw_std_rad  yaw std in radians
+     * @param [in] time         update time
+     * */
+    void forceYaw(double yaw_rad, double yaw_std_rad, double time);
+
+    /**
      * @brief 获取当前时间
      *        get current time
      * */

@@ -666,6 +666,30 @@ void GIEngine::headingUpdate() {
     has_heading_obs_ = false;
 }
 
+void GIEngine::forceYaw(double yaw_rad, double yaw_std_rad, double time) {
+
+    timestamp_ = time;
+
+    pvacur_.att.euler[2] = normalizeAngleRad(yaw_rad);
+    pvacur_.att.cbn      = Rotation::euler2matrix(pvacur_.att.euler);
+    pvacur_.att.qbn      = Rotation::euler2quaternion(pvacur_.att.euler);
+
+    // Keep the previous propagation anchor aligned with the corrected state.
+    // Otherwise the next IMU propagation can pull yaw back toward the stale branch.
+    pvapre_ = pvacur_;
+
+    const int yaw_idx = PHI_ID + 2;
+    const double yaw_var =
+        std::pow(std::max(1e-4, std::abs(yaw_std_rad)), 2.0);
+    Cov_.row(yaw_idx).setZero();
+    Cov_.col(yaw_idx).setZero();
+    Cov_(yaw_idx, yaw_idx) = yaw_var;
+
+    dx_.setZero();
+    has_heading_obs_ = false;
+    checkCov();
+}
+
 NavState GIEngine::getNavState() {
 
     NavState state;

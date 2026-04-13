@@ -325,6 +325,16 @@ public:
     return true;
   }
 
+  bool forceYaw(double t, double yaw_deg, double yaw_std_deg) override
+  {
+    const double yaw_rad = D2R(yaw_deg);
+    const double yaw_std_rad = D2R(std::max(0.1, std::abs(yaw_std_deg)));
+    engine_->forceYaw(yaw_rad, yaw_std_rad, t);
+    last_time_ = t;
+    fillState_(engine_->getNavState(), last_state_);
+    return true;
+  }
+
   // ★ 新增：实现接口所需 reset（不直接调私有 initialize）
   bool reset(double lat_deg, double lon_deg, double h_m, double yaw_deg) override
   {

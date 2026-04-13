@@ -33,7 +33,26 @@ kf_gins_node:
     heading_post_turn_reacquire_enable: true
     heading_post_turn_reacquire_window_sec: 2.0
     heading_post_turn_reacquire_max_residual_deg: 45.0
-    heading_post_turn_reacquire_std_deg: 7.0
+    heading_post_turn_reacquire_std_deg: 2.0
+    heading_post_turn_reacquire_hold_sec: 4.0
+    heading_post_turn_reacquire_max_rate_hz: 5.0
+    heading_post_turn_force_relock_enable: true
+    heading_post_turn_force_relock_min_residual_deg: 20.0
+    heading_post_turn_force_relock_min_consecutive_blocks: 3
+    heading_post_turn_force_relock_yaw_std_deg: 5.0
+    heading_post_turn_force_relock_max_rate_hz: 1.0
+    heading_post_turn_hold_force_relock_enable: true
+    heading_post_turn_hold_force_relock_min_residual_deg: 13.0
+    heading_post_turn_hold_force_relock_min_consecutive_blocks: 20
+    heading_armed_cruise_force_relock_enable: true
+    heading_armed_cruise_force_relock_min_residual_deg: 13.0
+    heading_armed_cruise_force_relock_min_consecutive_blocks: 30
+    heading_armed_cruise_force_relock_min_horizontal_speed_mps: 4.0
+    heading_armed_cruise_force_relock_max_vertical_speed_mps: 1.0
+    heading_armed_cruise_force_relock_max_gyro_deg_s: 2.0
+    heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s: 2.0
+    heading_armed_cruise_force_relock_yaw_std_deg: 5.0
+    heading_armed_cruise_force_relock_max_rate_hz: 1.0
     heading_recovery_enable: true
     heading_recovery_min_residual_deg: 15.0
     heading_recovery_max_residual_deg: 80.0
@@ -62,6 +81,15 @@ kf_gins_node:
     imu_gap_maneuver_cooldown_sec: 1.0
     skip_large_imu_gap_samples: true
     severe_imu_gap_reset_sec: 0.16
+    delta_imu_source_gap_bridge_enable: true
+    delta_imu_source_gap_bridge_min_sec: 0.05
+    delta_imu_source_gap_bridge_min_ratio: 5.0
+    delta_imu_source_gap_bridge_max_sec: 0.30
+    delta_imu_source_gap_reset_sec: 1.0
+    sensor_combined_source_gap_diag_enable: true
+    sensor_combined_source_gap_diag_min_sec: 0.05
+    sensor_combined_source_gap_diag_min_ratio: 5.0
+    sensor_combined_source_gap_reset_sec: 0.50
     
     # ===== 原有参数（保持兼容） =====
     use_sim_time: true

@@ -16,6 +16,9 @@ public:
   bool ingestHeading(double t, double yaw_deg, double yaw_std_deg) override {
     (void)yaw_std_deg; st_.sow = t; st_.yaw_deg = yaw_deg; return true;
   }
+  bool forceYaw(double t, double yaw_deg, double yaw_std_deg) override {
+    (void)yaw_std_deg; st_.sow = t; st_.yaw_deg = yaw_deg; return true;
+  }
   State current() const override { return st_; }
 private: State st_;
 };
