@@ -23,16 +23,35 @@
 #ifndef GI_ENGINE_H
 #define GI_ENGINE_H
 
+#include <cstdint>
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <vector>
 
 #include "common/types.h"
 
 #include "kf_gins_types.h"
+
+struct ObservationDebugInfo {
+    std::uint64_t sequence{0};
+    bool valid{false};
+    bool gnss_position_applied{false};
+    bool gnss_velocity_applied{false};
+    double update_time_sec{std::numeric_limits<double>::quiet_NaN()};
+    int update_mode{0};
+    Eigen::Vector3d gnss_position_residual_neu_m{
+        Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN())};
+    Eigen::Vector3d gnss_position_std_neu_m{
+        Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN())};
+    Eigen::Vector3d gnss_velocity_residual_ned_mps{
+        Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN())};
+    Eigen::Vector3d gnss_velocity_std_ned_mps{
+        Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN())};
+};
 
 class GIEngine {
 
@@ -153,6 +172,16 @@ public:
     void forceYaw(double yaw_rad, double yaw_std_rad, double time);
 
     /**
+     * @brief 强制将当前 roll/pitch 对齐到外部姿态，并重置对应协方差
+     *        force current roll/pitch to external attitude and reopen covariance
+     * @param [in] roll_rad            roll in radians
+     * @param [in] pitch_rad           pitch in radians
+     * @param [in] roll_pitch_std_rad  roll/pitch std in radians
+     * @param [in] time                update time
+     * */
+    void forceRollPitch(double roll_rad, double pitch_rad, double roll_pitch_std_rad, double time);
+
+    /**
      * @brief 获取当前时间
      *        get current time
      * */
@@ -172,6 +201,10 @@ public:
      * */
     Eigen::MatrixXd getCovariance() {
         return Cov_;
+    }
+
+    const ObservationDebugInfo &lastObservationDebug() const {
+        return last_observation_debug_;
     }
 
 private:
@@ -349,6 +382,7 @@ private:
      *        update state using GNSS velocity observation
      * */
     void gnssVelUpdate();
+    void beginObservationDebug(int update_mode, double update_time_sec);
 
     // 外部 heading 观测数据
     bool has_heading_obs_{false};
@@ -372,6 +406,7 @@ private:
     std::uint64_t sage_husa_k_{0};
     Eigen::MatrixXd R_gnsspos_;       // GNSS 观测噪声阵（持久化）/ GNSS noise matrix (persisted)
     Eigen::MatrixXd R_gnsspos_init_;  // 初始 R (用于下限) / initial R floor reference
+    ObservationDebugInfo last_observation_debug_{};
 
     // 状态ID和噪声ID
     // state ID and noise ID

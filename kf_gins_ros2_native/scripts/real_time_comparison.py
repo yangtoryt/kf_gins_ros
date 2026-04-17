@@ -13,6 +13,8 @@
 - 发布对比结果
 """
 
+import csv
+import os
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
@@ -36,6 +38,10 @@ class PoseData:
     roll: float
     pitch: float
     yaw: float
+    qx: float
+    qy: float
+    qz: float
+    qw: float
     vx: float = 0.0
     vy: float = 0.0
     vz: float = 0.0
@@ -65,6 +71,15 @@ class ComparisonMetrics:
     iekf_initialized: bool = False
     initialization_time_sec: float = 0.0
     convergence_time_sec: float = 0.0
+    fallback_active: bool = False
+    raw_available: bool = False
+    raw_position_error_xyz: list = field(default_factory=lambda: [float('nan'), float('nan'), float('nan')])
+    raw_position_error_norm: float = float('nan')
+    raw_attitude_error_rpy: list = field(default_factory=lambda: [float('nan'), float('nan'), float('nan')])
+    raw_attitude_error_norm: float = float('nan')
+    raw_velocity_error: list = field(default_factory=lambda: [float('nan'), float('nan'), float('nan')])
+    raw_velocity_error_norm: float = float('nan')
+    raw_pair_dt_ms: float = float('nan')
 
 
 class RealTimeComparison(Node):
@@ -78,7 +93,10 @@ class RealTimeComparison(Node):
         self.ekf2_pose_topic = self.declare_parameter('ekf2_pose_topic', legacy_ekf2_topic).value
         self.ekf2_odom_topic = self.declare_parameter('ekf2_odom_topic', '/ekf2/pose_odom').value
         self.iekf_topic = self.declare_parameter('iekf_topic', '/kf_gins/odom').value
+        self.iekf_raw_topic = self.declare_parameter('iekf_raw_topic', '').value
+        self.iekf_fallback_topic = self.declare_parameter('iekf_fallback_topic', '/kf_gins/fallback_active').value
         self.comparison_output = self.declare_parameter('comparison_output', '/comparison/metrics').value
+        self.metrics_csv_path = self.declare_parameter('metrics_csv_path', '').value
         self.iekf_reset_topic = self.declare_parameter('iekf_reset_topic', '/kf_gins/reset_event').value
         self.metrics_publish_rate = self.declare_parameter('metrics_publish_rate', 50).value
         self.sync_tolerance_ms = self.declare_parameter('sync_tolerance_ms', 20).value
@@ -109,6 +127,7 @@ class RealTimeComparison(Node):
         # 状态
         self.ekf2_data: Optional[PoseData] = None  # latest (for debug)
         self.iekf_data: Optional[PoseData] = None  # latest (for debug)
+        self.iekf_raw_data: Optional[PoseData] = None  # latest raw core output
         self.start_time = self.get_clock().now()
         self.ekf2_start_time: Optional[float] = None
         self.iekf_start_time: Optional[float] = None
@@ -116,6 +135,7 @@ class RealTimeComparison(Node):
         # 缓冲区（用于时间同步）
         self.ekf2_buf = deque(maxlen=max(10, int(self.buffer_len)))
         self.iekf_buf = deque(maxlen=max(10, int(self.buffer_len)))
+        self.iekf_raw_buf = deque(maxlen=max(10, int(self.buffer_len)))
         self.last_pair_key: Optional[tuple] = None
 
         # 初始对齐（消除常量偏移，避免 EKF2/home 与 KF-GINS/origin 不一致导致“常量误差”）
@@ -127,6 +147,12 @@ class RealTimeComparison(Node):
         self.position_error_history = deque(maxlen=5000)  # 100 秒 @ 50Hz
         self._last_valid_ekf2: Optional[PoseData] = None
         self._last_valid_iekf: Optional[PoseData] = None
+        self._last_valid_iekf_raw: Optional[PoseData] = None
+        self.fallback_active = False
+        self._csv_file = None
+        self._csv_writer = None
+        self._csv_rows_since_flush = 0
+        self._csv_flush_interval = max(1, int(self.metrics_publish_rate))
         
         # 初始化标志
         self.ekf2_initialized = False
@@ -161,6 +187,14 @@ class RealTimeComparison(Node):
             self.iekf_callback,
             qos
         )
+        self.iekf_raw_sub = None
+        if self.iekf_raw_topic:
+            self.iekf_raw_sub = self.create_subscription(
+                Odometry,
+                self.iekf_raw_topic,
+                self.iekf_raw_callback,
+                qos
+            )
 
         self.iekf_reset_sub = self.create_subscription(
             UInt32,
@@ -168,6 +202,14 @@ class RealTimeComparison(Node):
             self.iekf_reset_callback,
             qos
         )
+        self.fallback_sub = None
+        if self.iekf_fallback_topic:
+            self.fallback_sub = self.create_subscription(
+                Bool,
+                self.iekf_fallback_topic,
+                self.fallback_callback,
+                qos
+            )
         
         # 发布 - 发布对比指标
         self.metrics_pub = self.create_publisher(
@@ -208,6 +250,7 @@ class RealTimeComparison(Node):
         self.ekf2_init_pub = None
         self.iekf_init_pub = None
         self.sync_dt_pub = None
+        self.fallback_active_pub = None
 
         self.ekf2_pos_pub = None
         self.ekf2_vel_pub = None
@@ -254,19 +297,24 @@ class RealTimeComparison(Node):
             self.pos_err_xyz_pub = self.create_publisher(Vector3Stamped, "/comparison/pos_err_xyz", self._named_qos)
             self.vel_err_xyz_pub = self.create_publisher(Vector3Stamped, "/comparison/vel_err_xyz", self._named_qos)
             self.att_err_rpy_pub = self.create_publisher(Vector3Stamped, "/comparison/att_err_rpy", self._named_qos)
+            self.fallback_active_pub = self.create_publisher(Bool, "/comparison/fallback_active", self._named_qos)
         
         # 定时器 - 定期计算和发布指标
         period = 1.0 / max(1, self.metrics_publish_rate)
         self.timer = self.create_timer(period, self.compute_and_publish_metrics)
         
         self.metric_count = 0
+        self._open_metrics_csv()
         
         self.get_logger().info(
             f"RealTimeComparison 已启动\n"
             f"  EKF2 pose: {self.ekf2_pose_topic}\n"
             f"  EKF2 odom: {self.ekf2_odom_topic}\n"
             f"  IEKF: {self.iekf_topic}\n"
+            f"  IEKF raw: {self.iekf_raw_topic if self.iekf_raw_topic else '(disabled)'}\n"
+            f"  Fallback topic: {self.iekf_fallback_topic if self.iekf_fallback_topic else '(disabled)'}\n"
             f"  IEKF reset topic: {self.iekf_reset_topic}\n"
+            f"  CSV 输出: {self.metrics_csv_path if self.metrics_csv_path else '(disabled)'}\n"
             f"  发布频率: {self.metrics_publish_rate} Hz\n"
             f"  同步容差: ±{self.sync_tolerance_ms} ms\n"
             f"  初始对齐: {'开启' if self.align_initial else '关闭'}\n"
@@ -294,7 +342,7 @@ class RealTimeComparison(Node):
                 "    - /comparison/vel_err (m/s)\n"
                 "    - /comparison/att_err (rad), /comparison/yaw_err (rad)\n"
                 "    - /comparison/pos_err_xyz, /comparison/vel_err_xyz, /comparison/att_err_rpy (Vector3Stamped)\n"
-                "    - /comparison/sync_dt (s), /comparison/(ekf2_initialized|iekf_initialized) (Bool)"
+                "    - /comparison/sync_dt (s), /comparison/fallback_active, /comparison/(ekf2_initialized|iekf_initialized) (Bool)"
             )
         
     def ekf2_pose_callback(self, msg: PoseStamped):
@@ -309,7 +357,8 @@ class RealTimeComparison(Node):
             data = PoseData(
                 timestamp=ts,
                 x=pos.x, y=pos.y, z=pos.z,
-                roll=roll, pitch=pitch, yaw=yaw
+                roll=roll, pitch=pitch, yaw=yaw,
+                qx=quat.x, qy=quat.y, qz=quat.z, qw=quat.w
             )
             if not self._accept_pose_sample("EKF2", data, self._last_valid_ekf2):
                 return
@@ -343,6 +392,7 @@ class RealTimeComparison(Node):
                 timestamp=ts,
                 x=pos.x, y=pos.y, z=pos.z,
                 roll=roll, pitch=pitch, yaw=yaw,
+                qx=quat.x, qy=quat.y, qz=quat.z, qw=quat.w,
                 vx=twist.linear.x, vy=twist.linear.y, vz=twist.linear.z
             )
             if not self._accept_pose_sample("EKF2", data, self._last_valid_ekf2):
@@ -362,27 +412,24 @@ class RealTimeComparison(Node):
         except Exception as e:
             self.get_logger().error(f"EKF2 odom 处理错误: {e}", throttle_duration_sec=5)
 
+    def _odom_to_pose_data(self, msg: Odometry) -> PoseData:
+        ts = self.msg_to_sec(msg.header.stamp)
+        pos = msg.pose.pose.position
+        quat = msg.pose.pose.orientation
+        roll, pitch, yaw = self.quat_to_rpy(quat.x, quat.y, quat.z, quat.w)
+        twist = msg.twist.twist
+        return PoseData(
+            timestamp=ts,
+            x=pos.x, y=pos.y, z=pos.z,
+            roll=roll, pitch=pitch, yaw=yaw,
+            qx=quat.x, qy=quat.y, qz=quat.z, qw=quat.w,
+            vx=twist.linear.x, vy=twist.linear.y, vz=twist.linear.z
+        )
+
     def iekf_callback(self, msg: Odometry):
         """处理 IEKF 消息"""
         try:
-            ts = self.msg_to_sec(msg.header.stamp)
-            
-            # 解析位置
-            pos = msg.pose.pose.position
-            
-            # 解析姿态
-            quat = msg.pose.pose.orientation
-            roll, pitch, yaw = self.quat_to_rpy(quat.x, quat.y, quat.z, quat.w)
-            
-            # 解析速度
-            twist = msg.twist.twist
-            
-            data = PoseData(
-                timestamp=ts,
-                x=pos.x, y=pos.y, z=pos.z,
-                roll=roll, pitch=pitch, yaw=yaw,
-                vx=twist.linear.x, vy=twist.linear.y, vz=twist.linear.z
-            )
+            data = self._odom_to_pose_data(msg)
             if not self._accept_pose_sample("IEKF", data, self._last_valid_iekf):
                 return
             self.iekf_data = data
@@ -394,11 +441,26 @@ class RealTimeComparison(Node):
             
             if not self.iekf_initialized:
                 self.iekf_initialized = True
-                self.iekf_start_time = ts
+                self.iekf_start_time = data.timestamp
                 self.get_logger().info("✓ IEKF 已初始化")
             
         except Exception as e:
             self.get_logger().error(f"IEKF 处理错误: {e}", throttle_duration_sec=5)
+
+    def iekf_raw_callback(self, msg: Odometry):
+        """处理 raw IEKF 消息（不带业务 fallback）"""
+        try:
+            data = self._odom_to_pose_data(msg)
+            if not self._accept_pose_sample("IEKF(raw)", data, self._last_valid_iekf_raw):
+                return
+            self.iekf_raw_data = data
+            self.iekf_raw_buf.append(data)
+            self._last_valid_iekf_raw = data
+        except Exception as e:
+            self.get_logger().error(f"IEKF raw 处理错误: {e}", throttle_duration_sec=5)
+
+    def fallback_callback(self, msg: Bool):
+        self.fallback_active = bool(msg.data)
 
     def iekf_reset_callback(self, msg: UInt32):
         self._handle_iekf_reset_event(msg.data)
@@ -415,10 +477,16 @@ class RealTimeComparison(Node):
                 self.get_logger().warn("Synced data contains NaN/Inf; skipping metrics.", throttle_duration_sec=2)
                 return
 
-            metrics = self._compute_metrics(ekf2, iekf)
+            raw_iekf, raw_dt_sec = self._find_closest_pose_with_dt(self.iekf_raw_buf, iekf.timestamp)
+            metrics = self._compute_metrics(ekf2, iekf, raw_iekf)
+            if raw_iekf is not None and np.isfinite(raw_dt_sec):
+                metrics.raw_pair_dt_ms = float(raw_dt_sec) * 1000.0
             if not np.isfinite(metrics.position_error_norm) or not np.isfinite(metrics.attitude_error_norm) or not np.isfinite(metrics.velocity_error_norm):
                 self.get_logger().warn("Metrics contains NaN/Inf; skipping publish.", throttle_duration_sec=2)
                 return
+
+            elapsed = (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
+            self._write_metrics_csv(elapsed, sync_dt, metrics)
 
             if self.publish_named_metrics:
                 stamp_msg = self.get_clock().now().to_msg()
@@ -441,7 +509,7 @@ class RealTimeComparison(Node):
             
             self.metric_count += 1
             if self.metric_count % 50 == 0:  # 每秒打印一次 (50Hz)
-                self._log_metrics(metrics, sync_dt)
+                self._log_metrics(metrics, sync_dt, elapsed)
             
         except Exception as e:
             self.get_logger().error(f"计算指标时出错: {e}", throttle_duration_sec=5)
@@ -461,6 +529,10 @@ class RealTimeComparison(Node):
             self.yaw_err_pub.publish(self._make_f32(metrics.attitude_error_rpy[2]))
         if self.sync_dt_pub is not None:
             self.sync_dt_pub.publish(self._make_f32(float(sync_dt_sec)))
+        if self.fallback_active_pub is not None:
+            msg = Bool()
+            msg.data = bool(metrics.fallback_active)
+            self.fallback_active_pub.publish(msg)
 
         if self.ekf2_init_pub is not None:
             msg = Bool()
@@ -632,8 +704,11 @@ class RealTimeComparison(Node):
     def _handle_iekf_reset_event(self, seq: int) -> None:
         self._invalidate_alignment(f"IEKF reset event #{seq}")
         self.iekf_buf.clear()
+        self.iekf_raw_buf.clear()
         self._last_valid_iekf = None
+        self._last_valid_iekf_raw = None
         self.iekf_data = None
+        self.iekf_raw_data = None
         self.last_pair_key = None
         self.get_logger().warn(
             f"IEKF reset event #{seq}: cleared IEKF buffer and forcing realignment on next sync.",
@@ -663,10 +738,91 @@ class RealTimeComparison(Node):
             return False
         return True
 
-    def _compute_metrics(self, ekf2: PoseData, iekf: PoseData) -> ComparisonMetrics:
+    def _apply_alignment(self, pose: PoseData) -> tuple:
+        pose_x = pose.x
+        pose_y = pose.y
+        pose_z = pose.z
+        pose_yaw = pose.yaw
+        if self._offset_ready:
+            pose_x += float(self._pos_offset[0])
+            pose_y += float(self._pos_offset[1])
+            pose_z += float(self._pos_offset[2])
+            pose_yaw = self._normalize_angle(pose_yaw + self._yaw_offset)
+        return pose_x, pose_y, pose_z, pose_yaw
+
+    @staticmethod
+    def _quat_multiply(q1: tuple, q2: tuple) -> tuple:
+        x1, y1, z1, w1 = q1
+        x2, y2, z2, w2 = q2
+        return (
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        )
+
+    @staticmethod
+    def _quat_conjugate(q: tuple) -> tuple:
+        x, y, z, w = q
+        return (-x, -y, -z, w)
+
+    @staticmethod
+    def _quat_normalize(q: tuple) -> tuple:
+        x, y, z, w = q
+        norm = math.sqrt(x * x + y * y + z * z + w * w)
+        if norm <= 1e-12:
+            return (0.0, 0.0, 0.0, 1.0)
+        inv = 1.0 / norm
+        return (x * inv, y * inv, z * inv, w * inv)
+
+    @staticmethod
+    def _yaw_quaternion(yaw_rad: float) -> tuple:
+        half = 0.5 * yaw_rad
+        return (0.0, 0.0, math.sin(half), math.cos(half))
+
+    def _attitude_geodesic_error(self, reference: PoseData, candidate: PoseData) -> float:
+        candidate_q = (candidate.qx, candidate.qy, candidate.qz, candidate.qw)
+        if self.align_initial and self._offset_ready:
+            candidate_q = self._quat_multiply(self._yaw_quaternion(self._yaw_offset), candidate_q)
+        ref_q = self._quat_normalize((reference.qx, reference.qy, reference.qz, reference.qw))
+        cand_q = self._quat_normalize(candidate_q)
+        q_rel = self._quat_multiply(ref_q, self._quat_conjugate(cand_q))
+        q_rel = self._quat_normalize(q_rel)
+        w = max(-1.0, min(1.0, q_rel[3]))
+        return 2.0 * math.acos(abs(w))
+
+    def _compute_error_terms(self, ekf2: PoseData, candidate: PoseData) -> tuple:
+        cand_x, cand_y, cand_z, cand_yaw = self._apply_alignment(candidate)
+
+        pos_error_x = ekf2.x - cand_x
+        pos_error_y = ekf2.y - cand_y
+        pos_error_z = ekf2.z - cand_z
+        pos_error_norm = math.sqrt(pos_error_x**2 + pos_error_y**2 + pos_error_z**2)
+
+        roll_error = self._normalize_angle(ekf2.roll - candidate.roll)
+        pitch_error = self._normalize_angle(ekf2.pitch - candidate.pitch)
+        yaw_error = self._normalize_angle(ekf2.yaw - cand_yaw)
+        att_error_norm = self._attitude_geodesic_error(ekf2, candidate)
+
+        vel_error_x = ekf2.vx - candidate.vx
+        vel_error_y = ekf2.vy - candidate.vy
+        vel_error_z = ekf2.vz - candidate.vz
+        vel_error_norm = math.sqrt(vel_error_x**2 + vel_error_y**2 + vel_error_z**2)
+
+        return (
+            [pos_error_x, pos_error_y, pos_error_z],
+            pos_error_norm,
+            [roll_error, pitch_error, yaw_error],
+            att_error_norm,
+            [vel_error_x, vel_error_y, vel_error_z],
+            vel_error_norm,
+        )
+
+    def _compute_metrics(self, ekf2: PoseData, iekf: PoseData, iekf_raw: Optional[PoseData]) -> ComparisonMetrics:
         """计算对比指标"""
         metrics = ComparisonMetrics()
         metrics.timestamp = self.get_clock().now().nanoseconds * 1e-9
+        metrics.fallback_active = bool(self.fallback_active)
 
         if self.align_initial and not self._offset_ready:
             self._pos_offset = np.array([ekf2.x - iekf.x, ekf2.y - iekf.y, ekf2.z - iekf.z], dtype=float)
@@ -676,25 +832,14 @@ class RealTimeComparison(Node):
                 f"✓ 初始对齐完成: pos_offset={self._pos_offset.tolist()}, yaw_offset={math.degrees(self._yaw_offset):.2f}°"
             )
 
-        iekf_x = iekf.x
-        iekf_y = iekf.y
-        iekf_z = iekf.z
-        iekf_yaw = iekf.yaw
-        if self._offset_ready:
-            iekf_x += float(self._pos_offset[0])
-            iekf_y += float(self._pos_offset[1])
-            iekf_z += float(self._pos_offset[2])
-            iekf_yaw = self._normalize_angle(iekf_yaw + self._yaw_offset)
-        
-        # 位置误差
-        pos_error_x = ekf2.x - iekf_x
-        pos_error_y = ekf2.y - iekf_y
-        pos_error_z = ekf2.z - iekf_z
-        
-        metrics.position_error_xyz = [pos_error_x, pos_error_y, pos_error_z]
-        metrics.position_error_norm = math.sqrt(
-            pos_error_x**2 + pos_error_y**2 + pos_error_z**2
-        )
+        (
+            metrics.position_error_xyz,
+            metrics.position_error_norm,
+            metrics.attitude_error_rpy,
+            metrics.attitude_error_norm,
+            metrics.velocity_error,
+            metrics.velocity_error_norm,
+        ) = self._compute_error_terms(ekf2, iekf)
         
         # 保存到历史 (用于 RMSE)
         if np.isfinite(metrics.position_error_norm):
@@ -705,26 +850,17 @@ class RealTimeComparison(Node):
                 np.mean(np.array(list(self.position_error_history))**2)
             )
             metrics.position_mae = np.mean(np.abs(list(self.position_error_history)))
-        
-        # 姿态误差 (弧度)
-        roll_error = self._normalize_angle(ekf2.roll - iekf.roll)
-        pitch_error = self._normalize_angle(ekf2.pitch - iekf.pitch)
-        yaw_error = self._normalize_angle(ekf2.yaw - iekf_yaw)
-        
-        metrics.attitude_error_rpy = [roll_error, pitch_error, yaw_error]
-        metrics.attitude_error_norm = math.sqrt(
-            roll_error**2 + pitch_error**2 + yaw_error**2
-        )
-        
-        # 速度误差
-        vel_error_x = ekf2.vx - iekf.vx
-        vel_error_y = ekf2.vy - iekf.vy
-        vel_error_z = ekf2.vz - iekf.vz
-        
-        metrics.velocity_error = [vel_error_x, vel_error_y, vel_error_z]
-        metrics.velocity_error_norm = math.sqrt(
-            vel_error_x**2 + vel_error_y**2 + vel_error_z**2
-        )
+
+        if iekf_raw is not None and self._pose_is_finite(iekf_raw):
+            metrics.raw_available = True
+            (
+                metrics.raw_position_error_xyz,
+                metrics.raw_position_error_norm,
+                metrics.raw_attitude_error_rpy,
+                metrics.raw_attitude_error_norm,
+                metrics.raw_velocity_error,
+                metrics.raw_velocity_error_norm,
+            ) = self._compute_error_terms(ekf2, iekf_raw)
         
         # 初始化状态
         metrics.ekf2_initialized = self.ekf2_initialized
@@ -738,17 +874,28 @@ class RealTimeComparison(Node):
         
         return metrics
     
-    def _log_metrics(self, metrics: ComparisonMetrics, sync_dt_sec: float):
+    def _log_metrics(self, metrics: ComparisonMetrics, sync_dt_sec: float, elapsed: float):
         """打印指标摘要"""
-        elapsed = (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
+        raw_block = ""
+        if metrics.raw_available:
+            raw_block = (
+                f"  Raw core 位置误差: {metrics.raw_position_error_norm:.4f} m "
+                f"(XYZ={metrics.raw_position_error_xyz})\n"
+                f"  Raw core 姿态误差: {math.degrees(metrics.raw_attitude_error_norm):.2f}° "
+                f"(RPY={[math.degrees(x) for x in metrics.raw_attitude_error_rpy]})\n"
+                f"  Raw core 速度误差: {metrics.raw_velocity_error_norm:.4f} m/s "
+                f"(XYZ={metrics.raw_velocity_error})\n"
+            )
         self.get_logger().info(
             f"\n{'='*60}\n"
             f"对比指标 (t={elapsed:.1f}s):\n"
             f"  位置误差: {metrics.position_error_norm:.4f} m "
-            f"(RMSE={metrics.position_rmse:.4f} m, MAE={metrics.position_mae:.4f} m)\n"
+            f"(RMSE={metrics.position_rmse:.4f} m, MAE={metrics.position_mae:.4f} m, XYZ={metrics.position_error_xyz})\n"
             f"  姿态误差: {math.degrees(metrics.attitude_error_norm):.2f}° "
             f"(RPY={[math.degrees(x) for x in metrics.attitude_error_rpy]})\n"
-            f"  速度误差: {metrics.velocity_error_norm:.4f} m/s\n"
+            f"  速度误差: {metrics.velocity_error_norm:.4f} m/s (XYZ={metrics.velocity_error})\n"
+            f"{raw_block}"
+            f"  fallback_active: {'true' if metrics.fallback_active else 'false'}\n"
             f"  同步残差: {sync_dt_sec*1000.0:+.1f} ms\n"
             f"  EKF2 初始化: {'✓' if metrics.ekf2_initialized else '✗'}\n"
             f"  IEKF 初始化: {'✓' if metrics.iekf_initialized else '✗'}\n"
@@ -762,18 +909,8 @@ class RealTimeComparison(Node):
 
         tol_sec = max(0.0, float(self.sync_tolerance_ms)) * 1e-3
 
-        def find_closest(buf: deque, target_ts: float):
-            best = None
-            best_dt = float('inf')
-            for item in buf:
-                dt = item.timestamp - target_ts
-                if abs(dt) < abs(best_dt):
-                    best = item
-                    best_dt = dt
-            return best, best_dt
-
         ekf2_latest = self.ekf2_buf[-1]
-        iekf_match, _ = find_closest(self.iekf_buf, ekf2_latest.timestamp)
+        iekf_match = self._find_closest_pose(self.iekf_buf, ekf2_latest.timestamp)
         if iekf_match is not None:
             dt = ekf2_latest.timestamp - iekf_match.timestamp
             if abs(dt) <= tol_sec:
@@ -783,7 +920,7 @@ class RealTimeComparison(Node):
                     return ekf2_latest, iekf_match, dt
 
         iekf_latest = self.iekf_buf[-1]
-        ekf2_match, _ = find_closest(self.ekf2_buf, iekf_latest.timestamp)
+        ekf2_match = self._find_closest_pose(self.ekf2_buf, iekf_latest.timestamp)
         if ekf2_match is not None:
             dt = ekf2_match.timestamp - iekf_latest.timestamp
             if abs(dt) <= tol_sec:
@@ -793,6 +930,124 @@ class RealTimeComparison(Node):
                     return ekf2_match, iekf_latest, dt
 
         return None
+
+    def _find_closest_pose(self, buf: deque, target_ts: float) -> Optional[PoseData]:
+        best, _ = self._find_closest_pose_with_dt(buf, target_ts)
+        return best
+
+    def _find_closest_pose_with_dt(self, buf: deque, target_ts: float) -> tuple[Optional[PoseData], float]:
+        if not buf:
+            return None, float('inf')
+        tol_sec = max(0.0, float(self.sync_tolerance_ms)) * 1e-3
+        best = None
+        best_dt = float('inf')
+        for item in buf:
+            dt = item.timestamp - target_ts
+            if abs(dt) < abs(best_dt):
+                best = item
+                best_dt = dt
+        if best is None or abs(best_dt) > tol_sec:
+            return None, best_dt
+        return best, best_dt
+
+    def _open_metrics_csv(self) -> None:
+        if not self.metrics_csv_path:
+            return
+        csv_path = os.path.abspath(str(self.metrics_csv_path))
+        parent = os.path.dirname(csv_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        self._csv_file = open(csv_path, 'w', newline='')
+        fieldnames = [
+            'elapsed_sec',
+            'ros_time_sec',
+            'sync_dt_ms',
+            'fallback_active',
+            'raw_available',
+            'position_error_x_m',
+            'position_error_y_m',
+            'position_error_z_m',
+            'position_error_norm_m',
+            'position_rmse_m',
+            'position_mae_m',
+            'velocity_error_x_mps',
+            'velocity_error_y_mps',
+            'velocity_error_z_mps',
+            'velocity_error_norm_mps',
+            'attitude_error_roll_deg',
+            'attitude_error_pitch_deg',
+            'attitude_error_yaw_deg',
+            'attitude_error_norm_deg',
+            'raw_position_error_x_m',
+            'raw_position_error_y_m',
+            'raw_position_error_z_m',
+            'raw_position_error_norm_m',
+            'raw_pair_dt_ms',
+            'raw_velocity_error_x_mps',
+            'raw_velocity_error_y_mps',
+            'raw_velocity_error_z_mps',
+            'raw_velocity_error_norm_mps',
+            'raw_attitude_error_roll_deg',
+            'raw_attitude_error_pitch_deg',
+            'raw_attitude_error_yaw_deg',
+            'raw_attitude_error_norm_deg',
+            'ekf2_initialized',
+            'iekf_initialized',
+        ]
+        self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=fieldnames)
+        self._csv_writer.writeheader()
+
+    def _write_metrics_csv(self, elapsed: float, sync_dt_sec: float, metrics: ComparisonMetrics) -> None:
+        if self._csv_writer is None:
+            return
+        row = {
+            'elapsed_sec': float(elapsed),
+            'ros_time_sec': float(metrics.timestamp),
+            'sync_dt_ms': float(sync_dt_sec) * 1000.0,
+            'fallback_active': int(bool(metrics.fallback_active)),
+            'raw_available': int(bool(metrics.raw_available)),
+            'position_error_x_m': float(metrics.position_error_xyz[0]),
+            'position_error_y_m': float(metrics.position_error_xyz[1]),
+            'position_error_z_m': float(metrics.position_error_xyz[2]),
+            'position_error_norm_m': float(metrics.position_error_norm),
+            'position_rmse_m': float(metrics.position_rmse),
+            'position_mae_m': float(metrics.position_mae),
+            'velocity_error_x_mps': float(metrics.velocity_error[0]),
+            'velocity_error_y_mps': float(metrics.velocity_error[1]),
+            'velocity_error_z_mps': float(metrics.velocity_error[2]),
+            'velocity_error_norm_mps': float(metrics.velocity_error_norm),
+            'attitude_error_roll_deg': math.degrees(metrics.attitude_error_rpy[0]),
+            'attitude_error_pitch_deg': math.degrees(metrics.attitude_error_rpy[1]),
+            'attitude_error_yaw_deg': math.degrees(metrics.attitude_error_rpy[2]),
+            'attitude_error_norm_deg': math.degrees(metrics.attitude_error_norm),
+            'raw_position_error_x_m': float(metrics.raw_position_error_xyz[0]),
+            'raw_position_error_y_m': float(metrics.raw_position_error_xyz[1]),
+            'raw_position_error_z_m': float(metrics.raw_position_error_xyz[2]),
+            'raw_position_error_norm_m': float(metrics.raw_position_error_norm),
+            'raw_pair_dt_ms': float(metrics.raw_pair_dt_ms),
+            'raw_velocity_error_x_mps': float(metrics.raw_velocity_error[0]),
+            'raw_velocity_error_y_mps': float(metrics.raw_velocity_error[1]),
+            'raw_velocity_error_z_mps': float(metrics.raw_velocity_error[2]),
+            'raw_velocity_error_norm_mps': float(metrics.raw_velocity_error_norm),
+            'raw_attitude_error_roll_deg': math.degrees(metrics.raw_attitude_error_rpy[0]),
+            'raw_attitude_error_pitch_deg': math.degrees(metrics.raw_attitude_error_rpy[1]),
+            'raw_attitude_error_yaw_deg': math.degrees(metrics.raw_attitude_error_rpy[2]),
+            'raw_attitude_error_norm_deg': math.degrees(metrics.raw_attitude_error_norm),
+            'ekf2_initialized': int(bool(metrics.ekf2_initialized)),
+            'iekf_initialized': int(bool(metrics.iekf_initialized)),
+        }
+        self._csv_writer.writerow(row)
+        self._csv_rows_since_flush += 1
+        if self._csv_rows_since_flush >= self._csv_flush_interval:
+            self._csv_file.flush()
+            self._csv_rows_since_flush = 0
+
+    def _close_metrics_csv(self) -> None:
+        if self._csv_file is not None:
+            self._csv_file.flush()
+            self._csv_file.close()
+            self._csv_file = None
+            self._csv_writer = None
 
     @staticmethod
     def quat_to_rpy(x, y, z, w) -> tuple:
@@ -823,6 +1078,10 @@ class RealTimeComparison(Node):
         """将 ROS 时间戳转换为秒"""
         return stamp.sec + stamp.nanosec * 1e-9
 
+    def destroy_node(self):
+        self._close_metrics_csv()
+        return super().destroy_node()
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -834,7 +1093,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

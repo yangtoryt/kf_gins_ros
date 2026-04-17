@@ -1,0 +1,8 @@
+/**:
+  ros__parameters:
+    plugin_allowlist:
+      - command
+      - imu
+      - local_position
+      - sys_status
+      - waypoint

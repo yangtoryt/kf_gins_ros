@@ -305,10 +305,10 @@ public:
   {
     // GIEngine 使用 NED 速度
     Eigen::Vector3d vel_ned(vN, vE, vD);
-    // clamp std: 最小 0.1 m/s，避免数值问题
+    // clamp std: N/E 最小 0.05 m/s，D 最小 0.10 m/s，避免数值问题同时保留晚段 tightening 空间
     Eigen::Vector3d std_clamped;
-    std_clamped << std::max(0.1, std::abs(std_vel.x())),
-                   std::max(0.1, std::abs(std_vel.y())),
+    std_clamped << std::max(0.05, std::abs(std_vel.x())),
+                   std::max(0.05, std::abs(std_vel.y())),
                    std::max(0.1, std::abs(std_vel.z()));
     engine_->addVelData(vel_ned, std_clamped, t);
     return true;
@@ -330,6 +330,18 @@ public:
     const double yaw_rad = D2R(yaw_deg);
     const double yaw_std_rad = D2R(std::max(0.1, std::abs(yaw_std_deg)));
     engine_->forceYaw(yaw_rad, yaw_std_rad, t);
+    last_time_ = t;
+    fillState_(engine_->getNavState(), last_state_);
+    return true;
+  }
+
+  bool forceRollPitch(double t, double roll_deg, double pitch_deg,
+                      double roll_pitch_std_deg) override
+  {
+    const double roll_rad = D2R(roll_deg);
+    const double pitch_rad = D2R(pitch_deg);
+    const double roll_pitch_std_rad = D2R(std::max(0.1, std::abs(roll_pitch_std_deg)));
+    engine_->forceRollPitch(roll_rad, pitch_rad, roll_pitch_std_rad, t);
     last_time_ = t;
     fillState_(engine_->getNavState(), last_state_);
     return true;
@@ -386,6 +398,27 @@ public:
   }
 
   State current() const override { return last_state_; }
+
+  ObservationDebug lastObservationDebug() const override
+  {
+    ObservationDebug debug;
+    if (!engine_) {
+      return debug;
+    }
+
+    const ObservationDebugInfo & engine_debug = engine_->lastObservationDebug();
+    debug.sequence = engine_debug.sequence;
+    debug.valid = engine_debug.valid;
+    debug.gnss_position_applied = engine_debug.gnss_position_applied;
+    debug.gnss_velocity_applied = engine_debug.gnss_velocity_applied;
+    debug.update_time_sec = engine_debug.update_time_sec;
+    debug.update_mode = engine_debug.update_mode;
+    debug.gnss_position_residual_neu_m = engine_debug.gnss_position_residual_neu_m;
+    debug.gnss_position_std_neu_m = engine_debug.gnss_position_std_neu_m;
+    debug.gnss_velocity_residual_ned_mps = engine_debug.gnss_velocity_residual_ned_mps;
+    debug.gnss_velocity_std_ned_mps = engine_debug.gnss_velocity_std_ned_mps;
+    return debug;
+  }
 
 private:
   void zeroOptions_(GINSOptions& opt) {

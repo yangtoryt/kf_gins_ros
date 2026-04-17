@@ -2,8 +2,8 @@ kf_gins_node:
   ros__parameters:
     # ===== 【修复】新增的仿真/实机模式参数 =====
     use_sim_gnss_std: true          # 启用仿真模式 GNSS std
-    sim_gnss_std_h_m: 0.1           # 仿真环境下的水平 GNSS 标准差（米）
-    sim_gnss_std_u_m: 0.2           # 仿真环境下的竖直 GNSS 标准差（米）
+    sim_gnss_std_h_m: 0.08          # 仿真环境下的水平 GNSS 标准差（米）
+    sim_gnss_std_u_m: 0.10          # 仿真环境下的竖直 GNSS 标准差（米）
     use_zero_velocity_update_when_disarmed: true  # 无人机未启动时应用零速度约束
     zupt_reset_interval_sec: 1.0    # 地面 ZUPT 复位间隔（秒）
     zupt_std_mps: 0.05              # 预留：未来可接入真 ZUPT 观测
@@ -11,9 +11,16 @@ kf_gins_node:
     disarmed_yaw_lock_interval_sec: 1.0
     disarmed_yaw_lock_max_yaw_err_deg: 5.0
     force_zero_antlever: true
-    enable_gnss_velocity_update: false
-    gnss_vel_std_floor_h_mps: 0.15
-    gnss_vel_std_floor_u_mps: 0.3
+    enable_gnss_velocity_update: true   # active mission 的首发偏差先出现在 Z 轴 climb 段，先补 GNSS velocity 约束
+    gnss_vel_std_floor_h_mps: 0.10
+    gnss_vel_std_floor_u_mps: 0.15
+    native_gnss_speed_std_scale: 0.4
+    armed_cruise_native_gnss_vel_override_enable: true
+    armed_cruise_gnss_pos_override_enable: false
+    armed_cruise_gnss_pos_std_h_m: 0.06
+    armed_cruise_native_gnss_vel_min_horizontal_speed_mps: 0.5
+    armed_cruise_native_gnss_vel_std_h_mps: 0.05
+    armed_cruise_native_gnss_vel_std_u_mps: 0.10
     use_online_reset_covariance: true
     reset_pos_std_m: 5.0
     reset_vel_std_mps: 5.0
@@ -33,26 +40,40 @@ kf_gins_node:
     heading_post_turn_reacquire_enable: true
     heading_post_turn_reacquire_window_sec: 2.0
     heading_post_turn_reacquire_max_residual_deg: 45.0
-    heading_post_turn_reacquire_std_deg: 2.0
+    heading_post_turn_reacquire_std_deg: 1.5
     heading_post_turn_reacquire_hold_sec: 4.0
     heading_post_turn_reacquire_max_rate_hz: 5.0
     heading_post_turn_force_relock_enable: true
-    heading_post_turn_force_relock_min_residual_deg: 20.0
+    heading_post_turn_force_relock_min_residual_deg: 4.0
     heading_post_turn_force_relock_min_consecutive_blocks: 3
-    heading_post_turn_force_relock_yaw_std_deg: 5.0
+    heading_post_turn_force_relock_yaw_std_deg: 1.5
     heading_post_turn_force_relock_max_rate_hz: 1.0
     heading_post_turn_hold_force_relock_enable: true
-    heading_post_turn_hold_force_relock_min_residual_deg: 13.0
-    heading_post_turn_hold_force_relock_min_consecutive_blocks: 20
+    heading_post_turn_hold_force_relock_min_residual_deg: 4.0
+    heading_post_turn_hold_force_relock_min_consecutive_blocks: 4
     heading_armed_cruise_force_relock_enable: true
-    heading_armed_cruise_force_relock_min_residual_deg: 13.0
-    heading_armed_cruise_force_relock_min_consecutive_blocks: 30
+    heading_armed_cruise_force_relock_min_residual_deg: 1.8
+    heading_armed_cruise_force_relock_min_consecutive_blocks: 6
     heading_armed_cruise_force_relock_min_horizontal_speed_mps: 4.0
     heading_armed_cruise_force_relock_max_vertical_speed_mps: 1.0
     heading_armed_cruise_force_relock_max_gyro_deg_s: 2.0
     heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s: 2.0
-    heading_armed_cruise_force_relock_yaw_std_deg: 5.0
+    heading_armed_cruise_force_relock_yaw_std_deg: 1.5
     heading_armed_cruise_force_relock_max_rate_hz: 1.0
+    heading_underreaction_force_relock_enable: true
+    heading_underreaction_force_relock_min_residual_deg: 1.0
+    heading_underreaction_force_relock_min_remaining_ratio: 0.85
+    heading_underreaction_force_relock_yaw_std_deg: 1.5
+    heading_underreaction_force_relock_max_rate_hz: 4.0
+    heading_underreaction_force_relock_max_gyro_deg_s: 8.0
+    heading_underreaction_force_relock_max_source_yaw_rate_deg_s: 8.0
+    tilt_force_relock_enable: true
+    tilt_force_relock_min_residual_deg: 2.0
+    tilt_force_relock_roll_pitch_std_deg: 1.5
+    tilt_force_relock_once_per_motion_context: true
+    tilt_force_relock_max_rate_hz: 2.0
+    tilt_force_relock_max_gyro_deg_s: 8.0
+    tilt_force_relock_max_vertical_speed_mps: 1.5
     heading_recovery_enable: true
     heading_recovery_min_residual_deg: 15.0
     heading_recovery_max_residual_deg: 80.0
@@ -123,6 +144,7 @@ kf_gins_node:
     reset_gate_m: 8.0
     v_limit_mps: 20.0
     publish_max_core_gnss_diff_m: 5.0
+    fallback_to_gnss_pose_on_large_core_diff: true
 
     # GNSS 默认标准差（用于实机模式）
     gnss_default_std_h_m: 5.0

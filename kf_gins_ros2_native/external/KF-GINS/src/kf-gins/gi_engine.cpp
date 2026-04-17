@@ -139,6 +139,7 @@ void GIEngine::newImuProcess() {
         // only propagate navigation state
         insPropagation(imupre_, imucur_);
     } else if (res == 1) {
+        beginObservationDebug(res, gnssdata_.time);
         // GNSS数据靠近上一历元，先对上一历元进行GNSS更新
         // gnssdata is near to the previous imudata, we should firstly do gnss update
         gnssUpdate(gnssdata_);
@@ -149,6 +150,7 @@ void GIEngine::newImuProcess() {
         pvapre_ = pvacur_;
         insPropagation(imupre_, imucur_);
     } else if (res == 2) {
+        beginObservationDebug(res, gnssdata_.time);
         // GNSS数据靠近当前历元，先对当前IMU进行状态传播
         // gnssdata is near current imudata, we should firstly propagate navigation state
         insPropagation(imupre_, imucur_);
@@ -161,6 +163,7 @@ void GIEngine::newImuProcess() {
         // gnssdata is between the two imudata, we interpolate current imudata to gnss time
         IMU midimu;
         imuInterpolate(imupre_, imucur_, updatetime, midimu);
+        beginObservationDebug(res, gnssdata_.time);
 
         // 对前一半IMU进行状态传播
         // propagate navigation state for the first half imudata
@@ -187,6 +190,24 @@ void GIEngine::newImuProcess() {
     // update system state and imudata at the previous epoch
     pvapre_ = pvacur_;
     imupre_ = imucur_;
+}
+
+void GIEngine::beginObservationDebug(int update_mode, double update_time_sec) {
+
+    last_observation_debug_.sequence += 1;
+    last_observation_debug_.valid = true;
+    last_observation_debug_.gnss_position_applied = false;
+    last_observation_debug_.gnss_velocity_applied = false;
+    last_observation_debug_.update_time_sec = update_time_sec;
+    last_observation_debug_.update_mode = update_mode;
+    last_observation_debug_.gnss_position_residual_neu_m =
+        Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    last_observation_debug_.gnss_position_std_neu_m =
+        Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    last_observation_debug_.gnss_velocity_residual_ned_mps =
+        Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    last_observation_debug_.gnss_velocity_std_ned_mps =
+        Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
 }
 
 void GIEngine::imuCompensate(IMU &imu) {
@@ -338,11 +359,18 @@ void GIEngine::insPropagation(IMU &imupre, IMU &imucur) {
 
 void GIEngine::gnssUpdate(GNSS &gnssdata) {
 
-    // 如果是第一次进入，则使用观测数据初始化 R_gnsspos_
-    if (R_gnsspos_.norm() < 1e-12) {
-        R_gnsspos_ = gnssdata.std.cwiseProduct(gnssdata.std).asDiagonal();
-        R_gnsspos_init_ = R_gnsspos_;
+    const Eigen::Matrix3d gnss_meas_R =
+        gnssdata.std.cwiseProduct(gnssdata.std).asDiagonal();
+
+    // no_sage 主线需要每次都吃到当前观测 std；否则首帧 R 会把后续 override 锁死。
+    if (R_gnsspos_init_.norm() < 1e-12) {
+        R_gnsspos_init_ = gnss_meas_R;
         sage_husa_k_ = 0;
+    }
+    if (!use_sage_husa_) {
+        R_gnsspos_ = gnss_meas_R;
+    } else if (R_gnsspos_.norm() < 1e-12) {
+        R_gnsspos_ = gnss_meas_R;
     }
 
     // IEKF (iterated error-state EKF) GNSS位置更新
@@ -361,6 +389,12 @@ void GIEngine::gnssUpdate(GNSS &gnssdata) {
         H.block(0, P_ID, 3, 3)   = Eigen::Matrix3d::Identity();
         H.block(0, PHI_ID, 3, 3) = Rotation::skewSymmetric(pva.att.cbn * options_.antlever);
     };
+    Eigen::MatrixXd dz_prefit, H_prefit;
+    meas_model(pvacur_, imuerror_, dz_prefit, H_prefit);
+    last_observation_debug_.gnss_position_applied = true;
+    last_observation_debug_.gnss_position_residual_neu_m = dz_prefit.col(0);
+    last_observation_debug_.gnss_position_std_neu_m =
+        R_gnsspos_.diagonal().cwiseMax(0.0).cwiseSqrt();
     IEKFUpdate(meas_model, R_gnsspos_, Cov_);
 
     // GNSS更新之后设置为不可用
@@ -621,6 +655,9 @@ void GIEngine::gnssVelUpdate() {
 
     // 创新量 (innovation): 预测速度 - 观测速度
     Eigen::Vector3d dz = pvacur_.vel - vel_obs_;
+    last_observation_debug_.gnss_velocity_applied = true;
+    last_observation_debug_.gnss_velocity_residual_ned_mps = dz;
+    last_observation_debug_.gnss_velocity_std_ned_mps = vel_obs_std_;
 
     // 观测矩阵 (3x21): 速度状态直接可观
     Eigen::MatrixXd H(3, RANK);
@@ -684,6 +721,32 @@ void GIEngine::forceYaw(double yaw_rad, double yaw_std_rad, double time) {
     Cov_.row(yaw_idx).setZero();
     Cov_.col(yaw_idx).setZero();
     Cov_(yaw_idx, yaw_idx) = yaw_var;
+
+    dx_.setZero();
+    has_heading_obs_ = false;
+    checkCov();
+}
+
+void GIEngine::forceRollPitch(double roll_rad, double pitch_rad, double roll_pitch_std_rad, double time) {
+
+    timestamp_ = time;
+
+    pvacur_.att.euler[0] = roll_rad;
+    pvacur_.att.euler[1] = pitch_rad;
+    pvacur_.att.cbn      = Rotation::euler2matrix(pvacur_.att.euler);
+    pvacur_.att.qbn      = Rotation::euler2quaternion(pvacur_.att.euler);
+
+    pvapre_ = pvacur_;
+
+    const double rp_var =
+        std::pow(std::max(1e-4, std::abs(roll_pitch_std_rad)), 2.0);
+    const int roll_idx = PHI_ID + 0;
+    const int pitch_idx = PHI_ID + 1;
+    for (const int idx : {roll_idx, pitch_idx}) {
+        Cov_.row(idx).setZero();
+        Cov_.col(idx).setZero();
+        Cov_(idx, idx) = rp_var;
+    }
 
     dx_.setZero();
     has_heading_obs_ = false;

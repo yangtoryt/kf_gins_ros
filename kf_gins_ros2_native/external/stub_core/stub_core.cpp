@@ -19,7 +19,12 @@ public:
   bool forceYaw(double t, double yaw_deg, double yaw_std_deg) override {
     (void)yaw_std_deg; st_.sow = t; st_.yaw_deg = yaw_deg; return true;
   }
+  bool forceRollPitch(double t, double roll_deg, double pitch_deg,
+                      double roll_pitch_std_deg) override {
+    (void)roll_pitch_std_deg; st_.sow = t; st_.roll_deg = roll_deg; st_.pitch_deg = pitch_deg; return true;
+  }
   State current() const override { return st_; }
+  ObservationDebug lastObservationDebug() const override { return {}; }
 private: State st_;
 };
 std::unique_ptr<KFCore> create_kf_core(){ return std::unique_ptr<KFCore>(new StubCore()); }

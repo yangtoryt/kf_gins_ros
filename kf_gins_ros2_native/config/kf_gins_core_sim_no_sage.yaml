@@ -1,0 +1,45 @@
+# KF-GINS sim core config used by compare_ekf_iekf.launch.py
+# Based on external/KF-GINS/config/kf-gins.yaml, but with Sage-Husa adaptive R disabled.
+
+filter_mode: 1
+
+imupath: ""
+gnsspath: ""
+outputpath: ""
+
+imudatalen: 7
+imudatarate: 200
+
+starttime: 0
+endtime: 0
+
+initpos: [ 30.5, 114, 20 ]
+initvel: [ 0.0, 0.0, 0.0 ]
+initatt: [ 0.0, 0.0, 0.0 ]
+
+initgyrbias: [ 0, 0, 0 ]
+initaccbias: [ 0, 0, 0 ]
+initgyrscale: [ 0, 0, 0 ]
+initaccscale: [ 0, 0, 0 ]
+
+initposstd: [ 0.1, 0.1, 0.2 ]
+initvelstd: [ 0.05, 0.05, 0.05 ]
+initattstd: [ 0.5, 0.5, 1.0 ]
+
+imunoise:
+  arw: [0.24, 0.24, 0.24]
+  vrw: [0.24, 0.24, 0.24]
+  gbstd: [50.0, 50.0, 50.0]
+  abstd: [250.0, 250.0, 250.0]
+  gsstd: [1000.0, 1000.0, 1000.0]
+  asstd: [1000.0, 1000.0, 1000.0]
+  corrtime: 1.0
+
+antlever: [ 0.136, -0.301, -0.184 ]
+
+sage_husa:
+  enable: false
+  alpha: 0.95
+  diag_only: true
+  min_var_factor: 0.1
+  min_var_abs: 0.0

@@ -1,0 +1,7 @@
+/**/time:
+  ros__parameters:
+    time_ref_source: "fcu"
+    timesync_mode: MAVLINK
+    timesync_avg_alpha: 0.6
+    timesync_rate: 0.0
+    system_time_rate: 0.0

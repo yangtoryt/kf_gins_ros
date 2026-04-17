@@ -11,6 +11,7 @@ from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import State
 from std_msgs.msg import UInt32
 import math
+from typing import Optional
 
 class IEKFPathPublisher(Node):
     def __init__(self):
@@ -32,6 +33,14 @@ class IEKFPathPublisher(Node):
         self.max_abs_position_m = float(self.declare_parameter('max_abs_position_m', 10000.0).value)
         self.max_abs_velocity_mps = float(self.declare_parameter('max_abs_velocity_mps', 100.0).value)
         self.max_jump_distance_m = float(self.declare_parameter('max_jump_distance_m', 50.0).value)
+        self.mavros_state_stale_sec = max(
+            0.1,
+            float(self.declare_parameter('mavros_state_stale_sec', 1.5).value),
+        )
+        self.armed_false_hold_sec = max(
+            0.0,
+            float(self.declare_parameter('armed_false_hold_sec', 6.0).value),
+        )
         
         # QoS 配置
         qos_sub = QoSProfile(
@@ -79,6 +88,10 @@ class IEKFPathPublisher(Node):
         self.path.header.frame_id = self.frame_id
         self.last_pos = None
         self.mavros_armed = False
+        self.have_mavros_state = False
+        self.mavros_state_rx_sec: Optional[float] = None
+        self.path_armed = False
+        self._pending_disarm_since_sec: Optional[float] = None
         self._start_time_sec = self.get_clock().now().nanoseconds * 1e-9
         
         self.get_logger().info('IEKF Path Publisher 已启动')
@@ -88,8 +101,56 @@ class IEKFPathPublisher(Node):
             f'门控: require_armed={self.require_armed}, '
             f'startup_ignore_sec={self.startup_ignore_sec:.1f}, '
             f'max_jump_distance_m={self.max_jump_distance_m:.1f}, '
-            f'clear_on_reset_event={self.clear_on_reset_event}'
+            f'clear_on_reset_event={self.clear_on_reset_event}, '
+            f'mavros_state_stale_sec={self.mavros_state_stale_sec:.1f}, '
+            f'armed_false_hold_sec={self.armed_false_hold_sec:.1f}'
         )
+
+    def now_sec(self) -> float:
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def mavros_state_age_sec(self, now_sec: Optional[float] = None) -> float:
+        if now_sec is None:
+            now_sec = self.now_sec()
+        if self.mavros_state_rx_sec is None:
+            return math.inf
+        return max(0.0, now_sec - self.mavros_state_rx_sec)
+
+    def mavros_state_fresh(self, now_sec: Optional[float] = None) -> bool:
+        return self.mavros_state_age_sec(now_sec) <= self.mavros_state_stale_sec
+
+    def update_path_armed(self, now_sec: Optional[float] = None, reason: str = 'odom') -> bool:
+        if now_sec is None:
+            now_sec = self.now_sec()
+
+        state_fresh = self.have_mavros_state and self.mavros_state_fresh(now_sec)
+        candidate_armed = state_fresh and self.mavros_armed
+        next_armed = self.path_armed
+
+        if candidate_armed:
+            self._pending_disarm_since_sec = None
+            next_armed = True
+        elif self.path_armed and self.armed_false_hold_sec > 0.0:
+            if self._pending_disarm_since_sec is None:
+                self._pending_disarm_since_sec = now_sec
+            next_armed = (now_sec - self._pending_disarm_since_sec) < self.armed_false_hold_sec
+        else:
+            self._pending_disarm_since_sec = None
+            next_armed = False
+
+        if next_armed != self.path_armed:
+            state_age_sec = self.mavros_state_age_sec(now_sec)
+            state_age_str = 'n/a' if not math.isfinite(state_age_sec) else f'{state_age_sec:.2f}s'
+            self.get_logger().info(
+                f'Path armed transition: {self.path_armed} -> {next_armed} '
+                f'(reason={reason}, raw_armed={self.mavros_armed}, '
+                f'state_fresh={state_fresh}, state_age={state_age_str})'
+            )
+            self.path_armed = next_armed
+            if self.clear_on_arm_transition:
+                self.clear_path()
+
+        return self.path_armed
 
     def clear_path(self):
         self.path = Path()
@@ -116,19 +177,17 @@ class IEKFPathPublisher(Node):
         self.restart_segment()
 
     def state_callback(self, msg: State):
-        prev = self.mavros_armed
         self.mavros_armed = bool(msg.armed)
-        if prev != self.mavros_armed:
-            self.get_logger().info(f'Path armed transition: {prev} -> {self.mavros_armed}')
-            if self.clear_on_arm_transition:
-                self.clear_path()
+        self.have_mavros_state = True
+        self.mavros_state_rx_sec = self.now_sec()
+        self.update_path_armed(self.mavros_state_rx_sec, reason='state')
 
     def odom_callback(self, msg: Odometry):
         """处理接收到的 IEKF odometry"""
-        now_sec = self.get_clock().now().nanoseconds * 1e-9
+        now_sec = self.now_sec()
         if now_sec - self._start_time_sec < self.startup_ignore_sec:
             return
-        if self.require_armed and not self.mavros_armed:
+        if self.require_armed and not self.update_path_armed(now_sec, reason='odom'):
             return
 
         pos = msg.pose.pose.position

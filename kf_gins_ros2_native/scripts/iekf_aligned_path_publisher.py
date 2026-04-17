@@ -10,6 +10,7 @@ from geometry_msgs.msg import Vector3Stamped, PoseStamped
 from nav_msgs.msg import Path
 from std_msgs.msg import UInt32
 import math
+from typing import Optional
 from mavros_msgs.msg import State
 
 
@@ -45,6 +46,14 @@ class IEKFAlignedPathPublisher(Node):
         self.max_jump_distance_m = float(
             self.declare_parameter("max_jump_distance_m", 50.0).value
         )
+        self.mavros_state_stale_sec = max(
+            0.1,
+            float(self.declare_parameter("mavros_state_stale_sec", 1.5).value),
+        )
+        self.armed_false_hold_sec = max(
+            0.0,
+            float(self.declare_parameter("armed_false_hold_sec", 6.0).value),
+        )
         self.mavros_state_topic = str(
             self.declare_parameter("mavros_state_topic", "/mavros/state").value
         )
@@ -76,8 +85,11 @@ class IEKFAlignedPathPublisher(Node):
         self.last_pos = None
         self.mavros_armed = False
         self.have_mavros_state = False
+        self.mavros_state_rx_sec: Optional[float] = None
+        self.path_armed = False
+        self._pending_disarm_since_sec: Optional[float] = None
 
-        if self.require_armed:
+        if self.require_armed or self.clear_on_arm_transition:
             qos_state = QoSProfile(
                 depth=10,
                 history=QoSHistoryPolicy.KEEP_LAST,
@@ -109,8 +121,56 @@ class IEKFAlignedPathPublisher(Node):
             f"门控: require_armed={self.require_armed}, "
             f"max_abs_position_m={self.max_abs_position_m:.1f}, "
             f"max_jump_distance_m={self.max_jump_distance_m:.1f}, "
-            f"clear_on_reset_event={self.clear_on_reset_event}"
+            f"clear_on_reset_event={self.clear_on_reset_event}, "
+            f"mavros_state_stale_sec={self.mavros_state_stale_sec:.1f}, "
+            f"armed_false_hold_sec={self.armed_false_hold_sec:.1f}"
         )
+
+    def _now_sec(self) -> float:
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _mavros_state_age_sec(self, now_sec: Optional[float] = None) -> float:
+        if now_sec is None:
+            now_sec = self._now_sec()
+        if self.mavros_state_rx_sec is None:
+            return math.inf
+        return max(0.0, now_sec - self.mavros_state_rx_sec)
+
+    def _mavros_state_fresh(self, now_sec: Optional[float] = None) -> bool:
+        return self._mavros_state_age_sec(now_sec) <= self.mavros_state_stale_sec
+
+    def _update_path_armed(self, now_sec: Optional[float] = None, reason: str = "aligned") -> bool:
+        if now_sec is None:
+            now_sec = self._now_sec()
+
+        state_fresh = self.have_mavros_state and self._mavros_state_fresh(now_sec)
+        candidate_armed = state_fresh and self.mavros_armed
+        next_armed = self.path_armed
+
+        if candidate_armed:
+            self._pending_disarm_since_sec = None
+            next_armed = True
+        elif self.path_armed and self.armed_false_hold_sec > 0.0:
+            if self._pending_disarm_since_sec is None:
+                self._pending_disarm_since_sec = now_sec
+            next_armed = (now_sec - self._pending_disarm_since_sec) < self.armed_false_hold_sec
+        else:
+            self._pending_disarm_since_sec = None
+            next_armed = False
+
+        if next_armed != self.path_armed:
+            state_age_sec = self._mavros_state_age_sec(now_sec)
+            state_age_str = "n/a" if not math.isfinite(state_age_sec) else f"{state_age_sec:.2f}s"
+            self.get_logger().info(
+                f"Path armed transition: {self.path_armed} -> {next_armed} "
+                f"(reason={reason}, raw_armed={self.mavros_armed}, "
+                f"state_fresh={state_fresh}, state_age={state_age_str})"
+            )
+            self.path_armed = next_armed
+            if self.clear_on_arm_transition:
+                self._clear_path()
+
+        return self.path_armed
 
     def _clear_path(self):
         self.path = Path()
@@ -124,11 +184,10 @@ class IEKFAlignedPathPublisher(Node):
         self.last_pos = None
 
     def _on_state(self, msg: State):
-        prev = self.mavros_armed
         self.mavros_armed = bool(msg.armed)
         self.have_mavros_state = True
-        if self.clear_on_arm_transition and prev != self.mavros_armed:
-            self._clear_path()
+        self.mavros_state_rx_sec = self._now_sec()
+        self._update_path_armed(self.mavros_state_rx_sec, reason="state")
 
     def _on_reset_event(self, msg: UInt32):
         if self.clear_on_reset_event:
@@ -145,10 +204,9 @@ class IEKFAlignedPathPublisher(Node):
         self._restart_segment()
 
     def vec_callback(self, msg: Vector3Stamped):
+        now_sec = self._now_sec()
         if self.require_armed:
-            if not self.have_mavros_state:
-                return
-            if not self.mavros_armed:
+            if not self._update_path_armed(now_sec, reason="aligned"):
                 return
         pos = msg.vector
         vals = [pos.x, pos.y, pos.z]

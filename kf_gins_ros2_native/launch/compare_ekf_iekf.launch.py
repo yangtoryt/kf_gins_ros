@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, LogInfo, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, LogInfo, ExecuteProcess, TimerAction
 from launch.conditions import IfCondition
 from launch.conditions import UnlessCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, EnvironmentVariable, TextSubstitution, PythonExpression
@@ -21,6 +21,7 @@ def generate_launch_description():
     """
     
     # ============ 参数声明 ============
+    run_tag = datetime.now().strftime('%Y%m%d_%H%M%S')
     use_sim_time = DeclareLaunchArgument(
         'use_sim_time', default_value='true',
         description='Use simulation time (required for SITL)'
@@ -39,12 +40,10 @@ def generate_launch_description():
         'kf_gins_core_config_file',
         default_value=PathJoinSubstitution([
             FindPackageShare('kf_gins_ros2_native'),
-            'external',
-            'KF-GINS',
             'config',
-            'kf-gins.yaml'
+            'kf_gins_core_sim_no_sage.yaml'
         ]),
-        description='Original KF-GINS core YAML loaded by the adapter'
+        description='KF-GINS core YAML loaded by the adapter (sim default disables Sage-Husa adaptive R)'
     )
     use_gnss_llh_for_pose = DeclareLaunchArgument(
         'use_gnss_llh_for_pose', default_value='false',
@@ -82,6 +81,63 @@ def generate_launch_description():
     publish_aligned_iekf_state = DeclareLaunchArgument(
         'publish_aligned_iekf_state', default_value='true',
         description='Publish aligned IEKF state topics for PlotJuggler'
+    )
+    iekf_raw_topic = DeclareLaunchArgument(
+        'iekf_raw_topic', default_value='/kf_gins/odom_raw',
+        description='Optional raw IEKF odom topic for diagnostics'
+    )
+    iekf_fallback_topic = DeclareLaunchArgument(
+        'iekf_fallback_topic', default_value='/kf_gins/fallback_active',
+        description='Bool topic that reports whether /kf_gins/odom is currently using GNSS fallback'
+    )
+    comparison_csv_path = DeclareLaunchArgument(
+        'comparison_csv_path',
+        default_value=os.path.join('/tmp', f'kf_gins_comparison_{run_tag}', 'comparison_metrics.csv'),
+        description='Structured CSV output written by real_time_comparison.py'
+    )
+    gnss_update_debug_csv_path = DeclareLaunchArgument(
+        'gnss_update_debug_csv_path', default_value='',
+        description='Optional CSV output written by kf_gins_node for applied GNSS update diagnostics'
+    )
+    armed_cruise_native_gnss_vel_override_enable = DeclareLaunchArgument(
+        'armed_cruise_native_gnss_vel_override_enable', default_value='true',
+        description='Tighten native GNSS velocity std during armed late-cruise motion context'
+    )
+    armed_cruise_gnss_pos_override_enable = DeclareLaunchArgument(
+        'armed_cruise_gnss_pos_override_enable', default_value='false',
+        description='Optionally tighten GNSS position std during post-turn or stable armed cruise'
+    )
+    armed_cruise_gnss_pos_std_h_m = DeclareLaunchArgument(
+        'armed_cruise_gnss_pos_std_h_m', default_value='0.06',
+        description='Horizontal GNSS position std used when armed cruise position override is active'
+    )
+    armed_cruise_native_gnss_vel_min_horizontal_speed_mps = DeclareLaunchArgument(
+        'armed_cruise_native_gnss_vel_min_horizontal_speed_mps', default_value='0.5',
+        description='Minimum horizontal speed for late-cruise native GNSS velocity tightening'
+    )
+    armed_cruise_native_gnss_vel_std_h_mps = DeclareLaunchArgument(
+        'armed_cruise_native_gnss_vel_std_h_mps', default_value='0.05',
+        description='Horizontal native GNSS velocity std used when late-cruise override is active'
+    )
+    armed_cruise_native_gnss_vel_std_u_mps = DeclareLaunchArgument(
+        'armed_cruise_native_gnss_vel_std_u_mps', default_value='0.10',
+        description='Vertical native GNSS velocity std used when late-cruise override is active'
+    )
+    tilt_force_relock_min_residual_deg = DeclareLaunchArgument(
+        'tilt_force_relock_min_residual_deg', default_value='2.0',
+        description='Minimum roll/pitch residual for tilt force relock'
+    )
+    tilt_force_relock_roll_pitch_std_deg = DeclareLaunchArgument(
+        'tilt_force_relock_roll_pitch_std_deg', default_value='1.5',
+        description='Roll/pitch std for tilt force relock'
+    )
+    tilt_force_relock_once_per_motion_context = DeclareLaunchArgument(
+        'tilt_force_relock_once_per_motion_context', default_value='true',
+        description='Limit tilt force relock to one hit per post-turn or armed-cruise context'
+    )
+    tilt_force_relock_max_rate_hz = DeclareLaunchArgument(
+        'tilt_force_relock_max_rate_hz', default_value='2.0',
+        description='Maximum rate for tilt force relock'
     )
     aligned_fallback_raw = DeclareLaunchArgument(
         'aligned_fallback_raw', default_value='false',
@@ -122,25 +178,89 @@ def generate_launch_description():
         'px4_vehicle_imu_topic', default_value='/fmu/out/vehicle_imu',
         description='PX4 DDS VehicleImu topic'
     )
+    px4_imu_qos_depth = DeclareLaunchArgument(
+        'px4_imu_qos_depth', default_value='200',
+        description='Queue depth for PX4 DDS IMU subscriptions in kf_gins_node'
+    )
     mavros_gps_topic = DeclareLaunchArgument(
         'mavros_gps_topic', default_value='/mavros/global_position/raw/fix',
         description='MAVROS GNSS topic (default: /mavros/global_position/raw/fix)'
+    )
+    gnss_relay_mode = DeclareLaunchArgument(
+        'gnss_relay_mode', default_value='mavros',
+        description='GNSS relay source: mavros, px4_sensor_gps, or px4_vehicle_global_position'
+    )
+    gnss_source = DeclareLaunchArgument(
+        'gnss_source', default_value='navsatfix',
+        description='KF-GINS GNSS source: navsatfix, px4_sensor_gps, or px4_vehicle_global_position'
+    )
+    px4_sensor_gps_topic = DeclareLaunchArgument(
+        'px4_sensor_gps_topic', default_value='/fmu/out/vehicle_gps_position',
+        description='PX4 DDS SensorGps topic'
+    )
+    px4_vehicle_global_position_topic = DeclareLaunchArgument(
+        'px4_vehicle_global_position_topic', default_value='/fmu/out/vehicle_global_position',
+        description='PX4 DDS VehicleGlobalPosition topic'
     )
     mavros_local_pose_topic = DeclareLaunchArgument(
         'mavros_local_pose_topic', default_value='/mavros/local_position/pose',
         description='MAVROS local pose topic (default: /mavros/local_position/pose)'
     )
+    ekf2_input_mode = DeclareLaunchArgument(
+        'ekf2_input_mode', default_value='mavros_pose',
+        description='EKF2 relay input mode: mavros_pose or px4_vehicle_odometry'
+    )
+    px4_vehicle_odometry_topic = DeclareLaunchArgument(
+        'px4_vehicle_odometry_topic', default_value='/fmu/out/vehicle_odometry',
+        description='PX4 DDS VehicleOdometry topic for EKF2 relay'
+    )
+    enable_px4_aux_state_relay = DeclareLaunchArgument(
+        'enable_px4_aux_state_relay', default_value='false',
+        description='Relay PX4 VehicleOdometry into MAVROS-like helper topics for KF-GINS speed/heading'
+    )
+    px4_aux_imu_topic = DeclareLaunchArgument(
+        'px4_aux_imu_topic', default_value='/px4_aux/imu/data',
+        description='Relay output IMU topic used as KF-GINS heading source'
+    )
+    px4_aux_local_velocity_topic = DeclareLaunchArgument(
+        'px4_aux_local_velocity_topic', default_value='/px4_aux/local_position/velocity_local',
+        description='Relay output local velocity topic used as KF-GINS speed source'
+    )
     mavros_local_velocity_topic = DeclareLaunchArgument(
         'mavros_local_velocity_topic', default_value='/mavros/local_position/velocity_local',
         description='MAVROS local velocity topic (default: /mavros/local_position/velocity_local)'
+    )
+    speed_source = DeclareLaunchArgument(
+        'speed_source', default_value='mavros_local_velocity',
+        description='Speed source for KF-GINS heading gates: mavros_local_velocity, px4_vehicle_local_position, or px4_vehicle_odometry'
+    )
+    px4_vehicle_local_position_topic = DeclareLaunchArgument(
+        'px4_vehicle_local_position_topic', default_value='/fmu/out/vehicle_local_position',
+        description='PX4 DDS VehicleLocalPosition topic'
     )
     mavros_state_topic = DeclareLaunchArgument(
         'mavros_state_topic', default_value='/mavros/state',
         description='MAVROS state topic (default: /mavros/state)'
     )
+    heading_source = DeclareLaunchArgument(
+        'heading_source', default_value='mavros_imu',
+        description='Heading source for KF-GINS: mavros_imu, px4_vehicle_attitude, or px4_vehicle_odometry'
+    )
+    mavros_heading_topic = DeclareLaunchArgument(
+        'mavros_heading_topic', default_value='/mavros/imu/data',
+        description='MAVROS EKF2 heading topic (default: /mavros/imu/data)'
+    )
+    px4_vehicle_attitude_topic = DeclareLaunchArgument(
+        'px4_vehicle_attitude_topic', default_value='/fmu/out/vehicle_attitude',
+        description='PX4 DDS VehicleAttitude topic'
+    )
     mavros_hil_gps_topic = DeclareLaunchArgument(
         'mavros_hil_gps_topic', default_value='/mavros/hil/gps',
         description='MAVROS HIL GPS topic (default: /mavros/hil/gps)'
+    )
+    gnss_relay_start_delay_sec = DeclareLaunchArgument(
+        'gnss_relay_start_delay_sec', default_value='0.0',
+        description='Delay GNSS relay startup so KF-GINS can receive heading before first GNSS reset'
     )
 
     # ============ GNSS Dropzones (可选) ============
@@ -191,6 +311,35 @@ def generate_launch_description():
         description='Require arming before publishing IEKF aligned path'
     )
 
+    enable_ekf2_path = DeclareLaunchArgument(
+        'enable_ekf2_path', default_value='true',
+        description='Enable EKF2 path publisher'
+    )
+    enable_iekf_path = DeclareLaunchArgument(
+        'enable_iekf_path', default_value='true',
+        description='Enable raw IEKF path publisher'
+    )
+    enable_gt_path = DeclareLaunchArgument(
+        'enable_gt_path', default_value='true',
+        description='Enable ground-truth/odom-to-path publisher'
+    )
+    enable_ekf2_relay = DeclareLaunchArgument(
+        'enable_ekf2_relay', default_value='true',
+        description='Enable EKF2 pose relay node'
+    )
+    enable_kf_gins = DeclareLaunchArgument(
+        'enable_kf_gins', default_value='true',
+        description='Enable KF-GINS node'
+    )
+    kf_gins_start_delay_sec = DeclareLaunchArgument(
+        'kf_gins_start_delay_sec', default_value='0.0',
+        description='Delay KF-GINS startup to let helper topics publish before first GNSS reset'
+    )
+    enable_iekf_aligned_path = DeclareLaunchArgument(
+        'enable_iekf_aligned_path', default_value='true',
+        description='Enable aligned IEKF path publisher'
+    )
+
     gps_dropzones_yaml = PathJoinSubstitution([
         FindPackageShare('kf_gins_ros2_native'),
         'config',
@@ -226,6 +375,23 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_imu_converter'))
     )
 
+    px4_aux_state_relay = Node(
+        package='kf_gins_ros2_native',
+        executable='px4_aux_state_relay.py',
+        name='px4_aux_state_relay',
+        output='screen',
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'vehicle_odometry_topic': LaunchConfiguration('px4_vehicle_odometry_topic'),
+            'imu_output_topic': LaunchConfiguration('px4_aux_imu_topic'),
+            'velocity_output_topic': LaunchConfiguration('px4_aux_local_velocity_topic'),
+            'use_px4_stamp': True,
+            'imu_frame_id': 'base_link',
+            'velocity_frame_id': 'map',
+        }],
+        condition=IfCondition(LaunchConfiguration('enable_px4_aux_state_relay')),
+    )
+
     gnss_relay = Node(
         package='kf_gins_ros2_native',
         executable='gnss_relay.py',
@@ -236,7 +402,43 @@ def generate_launch_description():
             'in_topic': LaunchConfiguration('mavros_gps_topic'),
             'out_topic': '/gps/fix'
         }],
-        condition=UnlessCondition(LaunchConfiguration('enable_gps_dropzones')),
+        condition=IfCondition(PythonExpression([
+            "'",
+            LaunchConfiguration('enable_gps_dropzones'),
+            "' == 'false' and '",
+            LaunchConfiguration('gnss_relay_mode'),
+            "' == 'mavros'",
+        ])),
+    )
+    px4_gnss_relay = Node(
+        package='kf_gins_ros2_native',
+        executable='px4_gnss_relay.py',
+        name='px4_gnss_relay',
+        output='screen',
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'input_mode': PythonExpression([
+                "'sensor_gps' if '",
+                LaunchConfiguration('gnss_relay_mode'),
+                "' == 'px4_sensor_gps' else 'vehicle_global_position'"
+            ]),
+            'sensor_gps_topic': LaunchConfiguration('px4_sensor_gps_topic'),
+            'vehicle_global_position_topic': LaunchConfiguration('px4_vehicle_global_position_topic'),
+            'output_topic': '/gps/fix',
+        }],
+        condition=IfCondition(PythonExpression([
+            "'",
+            LaunchConfiguration('enable_gps_dropzones'),
+            "' == 'false' and ('",
+            LaunchConfiguration('gnss_relay_mode'),
+            "' == 'px4_sensor_gps' or '",
+            LaunchConfiguration('gnss_relay_mode'),
+            "' == 'px4_vehicle_global_position')",
+        ])),
+    )
+    gnss_relay_delayed = TimerAction(
+        period=LaunchConfiguration('gnss_relay_start_delay_sec'),
+        actions=[gnss_relay, px4_gnss_relay],
     )
 
     gps_dropzones = Node(
@@ -342,7 +544,17 @@ def generate_launch_description():
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             # 默认 1000 点大约只有几十秒，会出现“尾迹滚动/老轨迹消失”的错觉
             'max_path_length': 20000,
+            'min_distance': 0.05,
+            'require_armed': True,
+            'clear_on_arm_transition': False,
+            'mavros_state_topic': LaunchConfiguration('mavros_state_topic'),
+            'startup_ignore_sec': 3.0,
+            'max_abs_position_m': 10000.0,
+            'max_jump_distance_m': 50.0,
+            'mavros_state_stale_sec': 1.5,
+            'armed_false_hold_sec': 6.0,
         }],
+        condition=IfCondition(LaunchConfiguration('enable_ekf2_path')),
     )
 
     iekf_path = Node(
@@ -365,7 +577,10 @@ def generate_launch_description():
             'max_abs_position_m': 10000.0,
             'max_abs_velocity_mps': 100.0,
             'max_jump_distance_m': 50.0,
+            'mavros_state_stale_sec': 1.5,
+            'armed_false_hold_sec': 6.0,
         }],
+        condition=IfCondition(LaunchConfiguration('enable_iekf_path')),
     )
 
     # 真值轨迹发布器
@@ -378,7 +593,8 @@ def generate_launch_description():
             'odom_topic': '/kf_gins/odom',  # 可改为 Gazebo 真值
             'path_topic': '/kf_gins/path_ground_truth',
             'buffer_length': 1000
-        }]
+        }],
+        condition=IfCondition(LaunchConfiguration('enable_gt_path')),
     )
 
     # ============ PX4 EKF2 (已通过 MAVROS 发布) ============
@@ -391,7 +607,9 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'input_mode': LaunchConfiguration('ekf2_input_mode'),
             'input_topic': LaunchConfiguration('mavros_local_pose_topic'),
+            'vehicle_odometry_topic': LaunchConfiguration('px4_vehicle_odometry_topic'),
             'velocity_topic': LaunchConfiguration('mavros_local_velocity_topic'),
             'output_topic': '/ekf2/pose',
             # 默认用 node time，确保与 IEKF 同一时间基准
@@ -399,7 +617,8 @@ def generate_launch_description():
             'use_covariance': False,
             'prefer_native_velocity': True,
             'max_native_velocity_age_sec': 0.5,
-        }]
+        }],
+        condition=IfCondition(LaunchConfiguration('enable_ekf2_relay')),
     )
 
     # ============ KF-GINS IEKF ============
@@ -417,7 +636,11 @@ def generate_launch_description():
                 'imu_topic': LaunchConfiguration('mavros_imu_topic'),
                 'px4_sensor_combined_topic': LaunchConfiguration('px4_sensor_combined_topic'),
                 'px4_vehicle_imu_topic': LaunchConfiguration('px4_vehicle_imu_topic'),
+                'px4_imu_qos_depth': LaunchConfiguration('px4_imu_qos_depth'),
+                'gnss_source': LaunchConfiguration('gnss_source'),
                 'gnss_topic': '/gps/fix',
+                'px4_sensor_gps_topic': LaunchConfiguration('px4_sensor_gps_topic'),
+                'px4_vehicle_global_position_topic': LaunchConfiguration('px4_vehicle_global_position_topic'),
                 'config_file': LaunchConfiguration('kf_gins_core_config_file'),
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
                 'use_gnss_llh_for_pose': LaunchConfiguration('use_gnss_llh_for_pose'),
@@ -427,13 +650,35 @@ def generate_launch_description():
                 'use_sim_gnss_std': LaunchConfiguration('use_sim_gnss_std'),
                 'sim_gnss_std_h_m': LaunchConfiguration('sim_gnss_std_h_m'),
                 'sim_gnss_std_u_m': LaunchConfiguration('sim_gnss_std_u_m'),
+                'gnss_update_debug_csv_path': LaunchConfiguration('gnss_update_debug_csv_path'),
+                'armed_cruise_native_gnss_vel_override_enable': LaunchConfiguration('armed_cruise_native_gnss_vel_override_enable'),
+                'armed_cruise_gnss_pos_override_enable': LaunchConfiguration('armed_cruise_gnss_pos_override_enable'),
+                'armed_cruise_gnss_pos_std_h_m': LaunchConfiguration('armed_cruise_gnss_pos_std_h_m'),
+                'armed_cruise_native_gnss_vel_min_horizontal_speed_mps': LaunchConfiguration('armed_cruise_native_gnss_vel_min_horizontal_speed_mps'),
+                'armed_cruise_native_gnss_vel_std_h_mps': LaunchConfiguration('armed_cruise_native_gnss_vel_std_h_mps'),
+                'armed_cruise_native_gnss_vel_std_u_mps': LaunchConfiguration('armed_cruise_native_gnss_vel_std_u_mps'),
+                'tilt_force_relock_min_residual_deg': LaunchConfiguration('tilt_force_relock_min_residual_deg'),
+                'tilt_force_relock_roll_pitch_std_deg': LaunchConfiguration('tilt_force_relock_roll_pitch_std_deg'),
+                'tilt_force_relock_once_per_motion_context': LaunchConfiguration('tilt_force_relock_once_per_motion_context'),
+                'tilt_force_relock_max_rate_hz': LaunchConfiguration('tilt_force_relock_max_rate_hz'),
                 # RViz Path gating: disarmed 时不画 Path，避免起飞前"蜘蛛网"
                 'mavros_state_topic': LaunchConfiguration('mavros_state_topic'),
                 'mavros_local_velocity_topic': LaunchConfiguration('mavros_local_velocity_topic'),
+                'speed_source': LaunchConfiguration('speed_source'),
+                'px4_vehicle_local_position_topic': LaunchConfiguration('px4_vehicle_local_position_topic'),
+                'px4_vehicle_odometry_topic': LaunchConfiguration('px4_vehicle_odometry_topic'),
+                'heading_source': LaunchConfiguration('heading_source'),
+                'mavros_heading_topic': LaunchConfiguration('mavros_heading_topic'),
+                'px4_vehicle_attitude_topic': LaunchConfiguration('px4_vehicle_attitude_topic'),
                 'path_require_armed': True,
                 'clear_path_on_arm_transition': False,
             }
-        ]
+        ],
+        condition=IfCondition(LaunchConfiguration('enable_kf_gins')),
+    )
+    kf_gins_delayed = TimerAction(
+        period=LaunchConfiguration('kf_gins_start_delay_sec'),
+        actions=[kf_gins],
     )
 
     # ============ 实时对比分析 ============
@@ -447,7 +692,10 @@ def generate_launch_description():
             'ekf2_pose_topic': '/ekf2/pose',
             'ekf2_odom_topic': '/ekf2/pose_odom',
             'iekf_topic': '/kf_gins/odom',
+            'iekf_raw_topic': LaunchConfiguration('iekf_raw_topic'),
+            'iekf_fallback_topic': LaunchConfiguration('iekf_fallback_topic'),
             'comparison_output': '/comparison/metrics',
+            'metrics_csv_path': LaunchConfiguration('comparison_csv_path'),
             'metrics_publish_rate': 50,  # 50 Hz
             'sync_tolerance_ms': 50,
             'align_initial': True,
@@ -462,7 +710,15 @@ def generate_launch_description():
             'publish_ekf2_state': LaunchConfiguration('publish_ekf2_state'),
             'publish_aligned_iekf_state': LaunchConfiguration('publish_aligned_iekf_state'),
         }],
-        condition=IfCondition(LaunchConfiguration('enable_real_time_comparison'))
+        condition=IfCondition(PythonExpression([
+            "'",
+            LaunchConfiguration('enable_real_time_comparison'),
+            "' == 'true' and '",
+            LaunchConfiguration('enable_kf_gins'),
+            "' == 'true' and '",
+            LaunchConfiguration('enable_ekf2_relay'),
+            "' == 'true'",
+        ]))
     )
 
     iekf_aligned_path = Node(
@@ -480,13 +736,21 @@ def generate_launch_description():
             'clear_on_arm_transition': False,
             'clear_on_reset_event': True,
             'mavros_state_topic': LaunchConfiguration('mavros_state_topic'),
+            'mavros_state_stale_sec': 1.5,
+            'armed_false_hold_sec': 6.0,
         }],
-        condition=IfCondition(LaunchConfiguration('enable_real_time_comparison'))
+        condition=IfCondition(PythonExpression([
+            "'",
+            LaunchConfiguration('enable_real_time_comparison'),
+            "' == 'true' and '",
+            LaunchConfiguration('enable_iekf_aligned_path'),
+            "' == 'true'",
+        ]))
     )
 
     # ============ ROS Bag 记录器 ============
     # 使用命令行工具而非 ros2bag Node (更稳定)
-    bag_dir = f"/tmp/kf_gins_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    bag_dir = f"/tmp/kf_gins_comparison_{run_tag}"
     
     # rosbag 会自动创建输出目录
     record_bag_node = ExecuteProcess(
@@ -507,6 +771,8 @@ def generate_launch_description():
              '/ekf2/state/velocity',
              '/ekf2/state/rpy',
              '/kf_gins/odom',
+             '/kf_gins/odom_raw',
+             '/kf_gins/fallback_active',
              '/kf_gins/path',
              '/comparison/metrics',
              '/comparison/pos_err',
@@ -519,6 +785,7 @@ def generate_launch_description():
              '/comparison/vel_err_xyz',
              '/comparison/att_err_rpy',
              '/comparison/sync_dt',
+             '/comparison/fallback_active',
              '/comparison/ekf2_initialized',
              '/comparison/iekf_initialized',
              '/iekf/state/position',
@@ -558,8 +825,10 @@ def generate_launch_description():
         "\n📊 监控信息:\n" +
         "  - EKF2 输出: /ekf2/pose\n" +
         "  - IEKF 输出: /kf_gins/odom\n" +
+        "  - IEKF raw 输出: /kf_gins/odom_raw\n" +
+        "  - fallback 标志: /kf_gins/fallback_active\n" +
         "  - 对比指标(误差): /comparison/metrics (Float32MultiArray, legacy)\n" +
-        "  - 对比指标(命名): /comparison/pos_err /comparison/yaw_err ...\n" +
+        "  - 对比指标(命名): /comparison/pos_err /comparison/yaw_err /comparison/fallback_active ...\n" +
         "  - 状态(PlotJuggler): /ekf2/state/*  /iekf/state/*  /iekf/state_aligned/*\n" +
         "  - GNSS 遮挡: enable_gps_dropzones:=true (见 /gps_dropzones/markers)\n" +
         "  - GNSS 注入: px4_gps_injection_mode:=hil_gps|gps_input\n" +
@@ -572,6 +841,7 @@ def generate_launch_description():
         "\n📈 离线分析 (测试后):\n" +
         "  python3 ~/kf_gins_ws/src/kf_gins_ros2_native/scripts/offline_analysis.py\n" +
         f"\n📁 rosbag 输出目录:\n  {bag_dir}\n" +
+        f"\n🧾 对比 CSV 输出:\n  {os.path.join('/tmp', f'kf_gins_comparison_{run_tag}', 'comparison_metrics.csv')}\n" +
         "\n" + "=" * 80
     )
 
@@ -611,6 +881,20 @@ def generate_launch_description():
         publish_ekf2_state,
         publish_iekf_state,
         publish_aligned_iekf_state,
+        iekf_raw_topic,
+        iekf_fallback_topic,
+        comparison_csv_path,
+        gnss_update_debug_csv_path,
+        armed_cruise_native_gnss_vel_override_enable,
+        armed_cruise_gnss_pos_override_enable,
+        armed_cruise_gnss_pos_std_h_m,
+        armed_cruise_native_gnss_vel_min_horizontal_speed_mps,
+        armed_cruise_native_gnss_vel_std_h_mps,
+        armed_cruise_native_gnss_vel_std_u_mps,
+        tilt_force_relock_min_residual_deg,
+        tilt_force_relock_roll_pitch_std_deg,
+        tilt_force_relock_once_per_motion_context,
+        tilt_force_relock_max_rate_hz,
         aligned_fallback_raw,
         ekf2_use_input_stamp,
         imu_use_node_stamp,
@@ -619,11 +903,27 @@ def generate_launch_description():
         imu_source,
         px4_sensor_combined_topic,
         px4_vehicle_imu_topic,
+        px4_imu_qos_depth,
         mavros_gps_topic,
+        gnss_relay_mode,
+        gnss_source,
+        px4_sensor_gps_topic,
+        px4_vehicle_global_position_topic,
         mavros_local_pose_topic,
+        ekf2_input_mode,
+        px4_vehicle_odometry_topic,
+        enable_px4_aux_state_relay,
+        px4_aux_imu_topic,
+        px4_aux_local_velocity_topic,
         mavros_local_velocity_topic,
+        speed_source,
+        px4_vehicle_local_position_topic,
         mavros_state_topic,
+        heading_source,
+        mavros_heading_topic,
+        px4_vehicle_attitude_topic,
         mavros_hil_gps_topic,
+        gnss_relay_start_delay_sec,
         enable_gps_dropzones,
         inject_dropzone_gps_to_px4,
         px4_gps_injection_mode,
@@ -634,6 +934,13 @@ def generate_launch_description():
         sim_gnss_std_h_m,
         sim_gnss_std_u_m,
         aligned_path_require_armed,
+        enable_ekf2_path,
+        enable_iekf_path,
+        enable_gt_path,
+        enable_ekf2_relay,
+        enable_kf_gins,
+        kf_gins_start_delay_sec,
+        enable_iekf_aligned_path,
         
         # 日志输出
         log_info,
@@ -641,7 +948,8 @@ def generate_launch_description():
         # 基础设施
         static_tf,
         imu_convert,
-        gnss_relay,
+        px4_aux_state_relay,
+        gnss_relay_delayed,
         gps_dropzones,
         px4_param_setter,
         hil_gps_relay,
@@ -654,7 +962,7 @@ def generate_launch_description():
         ekf2_relay,
         
         # IEKF
-        kf_gins,
+        kf_gins_delayed,
         
         # 对比
         real_time_comparison,

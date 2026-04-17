@@ -49,11 +49,20 @@ target_link_libraries(kf_gins_node kf_gins_node_lib)
 install(PROGRAMS
   kf_gins_ros2_native/record_px4_baseline.py
   scripts/imu_flu_to_frd.py
+  scripts/px4_flight_status_monitor.py
+  scripts/px4_mission_preflight.py
+  scripts/px4_mission_smoke.py
+  scripts/gps_vs_pose_probe.py
+  scripts/run_mission_mainline_metrics.sh
+  scripts/px4_upstream_headless_smoke.sh
+  scripts/px4_interactive_safe_bringup.sh
+  scripts/px4_interactive_full_stack_bringup.sh
   scripts/odom_to_path.py
   scripts/ekf2_path_publisher.py
   scripts/iekf_path_publisher.py
   scripts/iekf_aligned_path_publisher.py
   scripts/gnss_relay.py
+  scripts/px4_gnss_relay.py
   scripts/odom_to_gazebo.py
   scripts/kf_odom_to_vision.py
   scripts/gps_relay_dropzones.py
@@ -61,6 +70,7 @@ install(PROGRAMS
   scripts/gps_fix_to_mavros_hil_gps.py
   scripts/px4_param_setter.py
   scripts/ekf2_state_relay.py
+  scripts/px4_aux_state_relay.py
   scripts/sync_messages.py
   scripts/real_time_comparison.py
   scripts/offline_analysis.py
