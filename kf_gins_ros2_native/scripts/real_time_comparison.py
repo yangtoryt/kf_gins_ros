@@ -92,6 +92,7 @@ class RealTimeComparison(Node):
         legacy_ekf2_topic = self.declare_parameter('ekf2_topic', '/ekf2/pose').value
         self.ekf2_pose_topic = self.declare_parameter('ekf2_pose_topic', legacy_ekf2_topic).value
         self.ekf2_odom_topic = self.declare_parameter('ekf2_odom_topic', '/ekf2/pose_odom').value
+        self.subscribe_ekf2_pose = bool(self.declare_parameter('subscribe_ekf2_pose', True).value)
         self.iekf_topic = self.declare_parameter('iekf_topic', '/kf_gins/odom').value
         self.iekf_raw_topic = self.declare_parameter('iekf_raw_topic', '').value
         self.iekf_fallback_topic = self.declare_parameter('iekf_fallback_topic', '/kf_gins/fallback_active').value
@@ -99,9 +100,11 @@ class RealTimeComparison(Node):
         self.metrics_csv_path = self.declare_parameter('metrics_csv_path', '').value
         self.iekf_reset_topic = self.declare_parameter('iekf_reset_topic', '/kf_gins/reset_event').value
         self.metrics_publish_rate = self.declare_parameter('metrics_publish_rate', 50).value
+        self.metrics_log_period_sec = float(self.declare_parameter('metrics_log_period_sec', 10.0).value)
         self.sync_tolerance_ms = self.declare_parameter('sync_tolerance_ms', 20).value
         self.align_initial = self.declare_parameter('align_initial', True).value
         self.buffer_len = self.declare_parameter('buffer_len', 200).value
+        self.publish_live_metrics = bool(self.declare_parameter('publish_live_metrics', True).value)
         self.publish_named_metrics = bool(self.declare_parameter('publish_named_metrics', True).value)
         self.max_abs_position_m = float(self.declare_parameter('max_abs_position_m', 10000.0).value)
         self.max_abs_velocity_mps = float(self.declare_parameter('max_abs_velocity_mps', 100.0).value)
@@ -167,12 +170,14 @@ class RealTimeComparison(Node):
         )
         
         # 订阅
-        self.ekf2_pose_sub = self.create_subscription(
-            PoseStamped,
-            self.ekf2_pose_topic,
-            self.ekf2_pose_callback,
-            qos
-        )
+        self.ekf2_pose_sub = None
+        if self.subscribe_ekf2_pose and self.ekf2_pose_topic:
+            self.ekf2_pose_sub = self.create_subscription(
+                PoseStamped,
+                self.ekf2_pose_topic,
+                self.ekf2_pose_callback,
+                qos
+            )
 
         self.ekf2_odom_sub = self.create_subscription(
             Odometry,
@@ -212,15 +217,17 @@ class RealTimeComparison(Node):
             )
         
         # 发布 - 发布对比指标
-        self.metrics_pub = self.create_publisher(
-            Float32MultiArray,
-            self.comparison_output,
-            QoSProfile(
-                reliability=ReliabilityPolicy.RELIABLE,
-                history=HistoryPolicy.KEEP_LAST,
-                depth=10
+        self.metrics_pub = None
+        if self.publish_live_metrics:
+            self.metrics_pub = self.create_publisher(
+                Float32MultiArray,
+                self.comparison_output,
+                QoSProfile(
+                    reliability=ReliabilityPolicy.RELIABLE,
+                    history=HistoryPolicy.KEEP_LAST,
+                    depth=10
+                )
             )
-        )
 
         # 发布 - EKF2/IEKF 单独状态（position/velocity/rpy）
         # Use TRANSIENT_LOCAL so late subscribers (PlotJuggler) get the latest state immediately.
@@ -302,13 +309,17 @@ class RealTimeComparison(Node):
         # 定时器 - 定期计算和发布指标
         period = 1.0 / max(1, self.metrics_publish_rate)
         self.timer = self.create_timer(period, self.compute_and_publish_metrics)
+        self._metrics_log_interval = max(
+            1,
+            int(round(max(1.0, float(self.metrics_publish_rate)) * max(0.1, self.metrics_log_period_sec))),
+        )
         
         self.metric_count = 0
         self._open_metrics_csv()
         
         self.get_logger().info(
             f"RealTimeComparison 已启动\n"
-            f"  EKF2 pose: {self.ekf2_pose_topic}\n"
+            f"  EKF2 pose: {self.ekf2_pose_topic if self.ekf2_pose_sub is not None else '(disabled)'}\n"
             f"  EKF2 odom: {self.ekf2_odom_topic}\n"
             f"  IEKF: {self.iekf_topic}\n"
             f"  IEKF raw: {self.iekf_raw_topic if self.iekf_raw_topic else '(disabled)'}\n"
@@ -316,10 +327,12 @@ class RealTimeComparison(Node):
             f"  IEKF reset topic: {self.iekf_reset_topic}\n"
             f"  CSV 输出: {self.metrics_csv_path if self.metrics_csv_path else '(disabled)'}\n"
             f"  发布频率: {self.metrics_publish_rate} Hz\n"
+            f"  指标日志周期: {self.metrics_log_period_sec:.1f} s\n"
             f"  同步容差: ±{self.sync_tolerance_ms} ms\n"
             f"  初始对齐: {'开启' if self.align_initial else '关闭'}\n"
             f"  异常过滤: max_abs_position={self.max_abs_position_m:.1f} m, "
             f"max_pose_jump={self.max_pose_jump_m:.1f} m\n"
+            f"  Legacy /comparison/metrics 输出: {'开启' if self.publish_live_metrics else '关闭'}\n"
             f"  PlotJuggler 状态输出: "
             f"EKF2={'开启' if self.publish_ekf2_state else '关闭'}, "
             f"IEKF={'开启' if self.publish_iekf_state else '关闭'}, "
@@ -493,22 +506,22 @@ class RealTimeComparison(Node):
                 self._publish_named_metrics(stamp_msg, metrics, sync_dt)
             
             # 发布为 Float32MultiArray
-            array_msg = Float32MultiArray()
-            array_msg.data = [
-                metrics.position_error_norm,
-                metrics.attitude_error_norm,
-                metrics.velocity_error_norm,
-                metrics.position_rmse,
-                float(self.ekf2_initialized),
-                float(self.iekf_initialized),
-                metrics.initialization_time_sec,
-                float(sync_dt),
-            ]
-            
-            self.metrics_pub.publish(array_msg)
+            if self.metrics_pub is not None:
+                array_msg = Float32MultiArray()
+                array_msg.data = [
+                    metrics.position_error_norm,
+                    metrics.attitude_error_norm,
+                    metrics.velocity_error_norm,
+                    metrics.position_rmse,
+                    float(self.ekf2_initialized),
+                    float(self.iekf_initialized),
+                    metrics.initialization_time_sec,
+                    float(sync_dt),
+                ]
+                self.metrics_pub.publish(array_msg)
             
             self.metric_count += 1
-            if self.metric_count % 50 == 0:  # 每秒打印一次 (50Hz)
+            if self.metric_count % self._metrics_log_interval == 0:
                 self._log_metrics(metrics, sync_dt, elapsed)
             
         except Exception as e:

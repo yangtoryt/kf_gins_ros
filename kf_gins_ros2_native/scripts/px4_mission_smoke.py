@@ -493,6 +493,7 @@ class MissionSmoke(Node):
         print_period_sec: float,
         exit_after_gap_probe: bool,
         exit_after_reached_seq: Optional[int] = None,
+        require_disarm_on_success: bool = False,
     ) -> bool:
         deadline = time.monotonic() + timeout_sec
         last_print = 0.0
@@ -521,9 +522,12 @@ class MissionSmoke(Node):
                     return True
             if success_seq is not None and self.last_reached is not None and self.last_reached >= success_seq:
                 mission_success = True
+            success_ready = mission_success
+            if require_disarm_on_success:
+                success_ready = mission_success and self.state is not None and not self.state.armed
             if exit_after_gap_probe and self.gap_probe_done():
                 return True
-            if mission_success and self.gap_probe_done():
+            if success_ready and self.gap_probe_done():
                 return True
         return mission_success
 
@@ -555,6 +559,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--arm-retries", type=int, default=6, help="number of arm retries before failing")
     parser.add_argument("--arm-retry-delay", type=float, default=5.0, help="delay between arm retries in seconds")
     parser.add_argument("--mission-timeout", type=float, default=300.0, help="mission monitor timeout in seconds")
+    parser.add_argument(
+        "--post-mission-settle",
+        type=float,
+        default=0.0,
+        help="after mission success, keep spinning for this many seconds before exiting",
+    )
     parser.add_argument("--print-period", type=float, default=5.0, help="status print period in seconds")
     parser.add_argument(
         "--skip-mission-setup",
@@ -611,6 +621,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="exit successfully once /mission/reached reports this waypoint seq",
+    )
+    parser.add_argument(
+        "--require-disarm-on-success",
+        action="store_true",
+        help="after the success waypoint is reached, keep monitoring until the vehicle is disarmed",
     )
     parser.add_argument(
         "--skip-pull-mission-on-exit",
@@ -723,7 +738,11 @@ def main() -> int:
             print_period_sec=args.print_period,
             exit_after_gap_probe=args.exit_after_gap_probe,
             exit_after_reached_seq=args.exit_after_reached,
+            require_disarm_on_success=args.require_disarm_on_success,
         )
+        if success and args.post_mission_settle > 0.0:
+            print(f"[px4-smoke] post-mission settle: {args.post_mission_settle:.1f}s")
+            node.sleep_with_spin(args.post_mission_settle)
         node.print_gap_probe_summary()
         node.print_state()
         if not args.skip_pull_mission_on_exit:

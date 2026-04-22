@@ -82,6 +82,22 @@ def generate_launch_description():
         'publish_aligned_iekf_state', default_value='true',
         description='Publish aligned IEKF state topics for PlotJuggler'
     )
+    comparison_publish_named_metrics = DeclareLaunchArgument(
+        'comparison_publish_named_metrics', default_value='true',
+        description='Publish named comparison metric topics for live plotting'
+    )
+    comparison_publish_live_metrics = DeclareLaunchArgument(
+        'comparison_publish_live_metrics', default_value='true',
+        description='Publish legacy /comparison/metrics Float32MultiArray topic'
+    )
+    comparison_metrics_publish_rate = DeclareLaunchArgument(
+        'comparison_metrics_publish_rate', default_value='50',
+        description='Publish rate for real-time comparison metrics/state topics (Hz)'
+    )
+    comparison_metrics_log_period_sec = DeclareLaunchArgument(
+        'comparison_metrics_log_period_sec', default_value='10.0',
+        description='How often real_time_comparison prints metric summaries to its log'
+    )
     iekf_raw_topic = DeclareLaunchArgument(
         'iekf_raw_topic', default_value='/kf_gins/odom_raw',
         description='Optional raw IEKF odom topic for diagnostics'
@@ -104,12 +120,28 @@ def generate_launch_description():
         description='Tighten native GNSS velocity std during armed late-cruise motion context'
     )
     armed_cruise_gnss_pos_override_enable = DeclareLaunchArgument(
-        'armed_cruise_gnss_pos_override_enable', default_value='false',
-        description='Optionally tighten GNSS position std during post-turn or stable armed cruise'
+        'armed_cruise_gnss_pos_override_enable', default_value='true',
+        description='Tighten GNSS position std during armed flight when fresh speed data is available'
     )
     armed_cruise_gnss_pos_std_h_m = DeclareLaunchArgument(
         'armed_cruise_gnss_pos_std_h_m', default_value='0.06',
         description='Horizontal GNSS position std used when armed cruise position override is active'
+    )
+    armed_cruise_gnss_pos_std_u_m = DeclareLaunchArgument(
+        'armed_cruise_gnss_pos_std_u_m', default_value='0.08',
+        description='Vertical GNSS position std used when armed cruise position override is active'
+    )
+    armed_cruise_gnss_pos_residual_boost_enable = DeclareLaunchArgument(
+        'armed_cruise_gnss_pos_residual_boost_enable', default_value='false',
+        description='Temporarily tighten GNSS position std when the recent cruise GNSS position residual stays large'
+    )
+    armed_cruise_gnss_pos_residual_boost_threshold_m = DeclareLaunchArgument(
+        'armed_cruise_gnss_pos_residual_boost_threshold_m', default_value='0.12',
+        description='Previous GNSS horizontal position residual threshold that arms the temporary cruise position-std boost'
+    )
+    armed_cruise_gnss_pos_residual_boost_hold_sec = DeclareLaunchArgument(
+        'armed_cruise_gnss_pos_residual_boost_hold_sec', default_value='20.0',
+        description='How long to keep the temporary cruise position-std boost active after a large residual hit'
     )
     armed_cruise_native_gnss_vel_min_horizontal_speed_mps = DeclareLaunchArgument(
         'armed_cruise_native_gnss_vel_min_horizontal_speed_mps', default_value='0.5',
@@ -122,6 +154,78 @@ def generate_launch_description():
     armed_cruise_native_gnss_vel_std_u_mps = DeclareLaunchArgument(
         'armed_cruise_native_gnss_vel_std_u_mps', default_value='0.10',
         description='Vertical native GNSS velocity std used when late-cruise override is active'
+    )
+    armed_cruise_native_gnss_vel_residual_boost_enable = DeclareLaunchArgument(
+        'armed_cruise_native_gnss_vel_residual_boost_enable', default_value='true',
+        description='Temporarily tighten native GNSS velocity std when recent cruise east-velocity residual stays large'
+    )
+    armed_cruise_native_gnss_vel_residual_boost_threshold_mps = DeclareLaunchArgument(
+        'armed_cruise_native_gnss_vel_residual_boost_threshold_mps', default_value='0.10',
+        description='Previous GNSS east-velocity residual threshold that arms the temporary cruise velocity-std boost'
+    )
+    armed_cruise_native_gnss_vel_residual_boost_hold_sec = DeclareLaunchArgument(
+        'armed_cruise_native_gnss_vel_residual_boost_hold_sec', default_value='8.0',
+        description='How long to keep the temporary cruise velocity-std boost active after a large east residual hit'
+    )
+    armed_cruise_native_gnss_vel_residual_boost_std_h_mps = DeclareLaunchArgument(
+        'armed_cruise_native_gnss_vel_residual_boost_std_h_mps', default_value='0.03',
+        description='Horizontal native GNSS velocity std used while the temporary residual boost is active'
+    )
+    armed_cruise_native_gnss_vel_residual_boost_std_u_mps = DeclareLaunchArgument(
+        'armed_cruise_native_gnss_vel_residual_boost_std_u_mps', default_value='0.08',
+        description='Vertical native GNSS velocity std used while the temporary residual boost is active'
+    )
+    armed_cruise_vertical_cov_reopen_enable = DeclareLaunchArgument(
+        'armed_cruise_vertical_cov_reopen_enable', default_value='true',
+        description='Temporarily reopen vertical covariance when late-cruise vertical residuals stay large'
+    )
+    armed_cruise_vertical_cov_reopen_threshold_m = DeclareLaunchArgument(
+        'armed_cruise_vertical_cov_reopen_threshold_m', default_value='0.15',
+        description='Vertical residual threshold that arms the temporary vertical covariance reopen'
+    )
+    armed_cruise_vertical_cov_reopen_hold_sec = DeclareLaunchArgument(
+        'armed_cruise_vertical_cov_reopen_hold_sec', default_value='8.0',
+        description='How long to keep the temporary vertical covariance reopen active'
+    )
+    armed_cruise_vertical_cov_reopen_pos_std_m = DeclareLaunchArgument(
+        'armed_cruise_vertical_cov_reopen_pos_std_m', default_value='0.15',
+        description='Vertical position std floor while the temporary covariance reopen is active'
+    )
+    armed_cruise_vertical_cov_reopen_vel_std_mps = DeclareLaunchArgument(
+        'armed_cruise_vertical_cov_reopen_vel_std_mps', default_value='0.10',
+        description='Vertical velocity std floor while the temporary covariance reopen is active'
+    )
+    armed_cruise_vertical_cov_reopen_accbias_std_z_mps2 = DeclareLaunchArgument(
+        'armed_cruise_vertical_cov_reopen_accbias_std_z_mps2', default_value='0.05',
+        description='Vertical accelerometer bias std floor while the temporary covariance reopen is active'
+    )
+    post_flight_vertical_cov_reopen_enable = DeclareLaunchArgument(
+        'post_flight_vertical_cov_reopen_enable', default_value='true',
+        description='Temporarily reopen vertical covariance after landing while disarmed/post-flight vertical drift is being pulled back'
+    )
+    post_flight_vertical_cov_reopen_threshold_m = DeclareLaunchArgument(
+        'post_flight_vertical_cov_reopen_threshold_m', default_value='0.12',
+        description='Vertical residual threshold that refreshes the post-flight vertical covariance reopen'
+    )
+    post_flight_vertical_cov_reopen_hold_sec = DeclareLaunchArgument(
+        'post_flight_vertical_cov_reopen_hold_sec', default_value='20.0',
+        description='How long to keep the post-flight vertical covariance reopen active after each qualifying trigger'
+    )
+    post_flight_vertical_cov_reopen_grace_sec = DeclareLaunchArgument(
+        'post_flight_vertical_cov_reopen_grace_sec', default_value='30.0',
+        description='Always keep the post-flight vertical covariance reopen active for this long immediately after disarm'
+    )
+    post_flight_vertical_cov_reopen_pos_std_m = DeclareLaunchArgument(
+        'post_flight_vertical_cov_reopen_pos_std_m', default_value='0.25',
+        description='Vertical position std floor while the post-flight covariance reopen is active'
+    )
+    post_flight_vertical_cov_reopen_vel_std_mps = DeclareLaunchArgument(
+        'post_flight_vertical_cov_reopen_vel_std_mps', default_value='0.10',
+        description='Vertical velocity std floor while the post-flight covariance reopen is active'
+    )
+    post_flight_vertical_cov_reopen_accbias_std_z_mps2 = DeclareLaunchArgument(
+        'post_flight_vertical_cov_reopen_accbias_std_z_mps2', default_value='0.05',
+        description='Vertical accelerometer bias std floor while the post-flight covariance reopen is active'
     )
     tilt_force_relock_min_residual_deg = DeclareLaunchArgument(
         'tilt_force_relock_min_residual_deg', default_value='2.0',
@@ -146,6 +250,10 @@ def generate_launch_description():
     ekf2_use_input_stamp = DeclareLaunchArgument(
         'ekf2_use_input_stamp', default_value='false',
         description='Use MAVROS stamp for EKF2 relay (false uses node time for sync)'
+    )
+    ekf2_relay_publish_pose = DeclareLaunchArgument(
+        'ekf2_relay_publish_pose', default_value='true',
+        description='Publish /ekf2/pose from ekf2_state_relay in addition to /ekf2/pose_odom'
     )
 
     imu_use_node_stamp = DeclareLaunchArgument(
@@ -181,6 +289,10 @@ def generate_launch_description():
     px4_imu_qos_depth = DeclareLaunchArgument(
         'px4_imu_qos_depth', default_value='200',
         description='Queue depth for PX4 DDS IMU subscriptions in kf_gins_node'
+    )
+    comparison_subscribe_ekf2_pose = DeclareLaunchArgument(
+        'comparison_subscribe_ekf2_pose', default_value='true',
+        description='Subscribe real_time_comparison to /ekf2/pose in addition to /ekf2/pose_odom'
     )
     mavros_gps_topic = DeclareLaunchArgument(
         'mavros_gps_topic', default_value='/mavros/global_position/raw/fix',
@@ -297,12 +409,12 @@ def generate_launch_description():
     )
     
     sim_gnss_std_h_m = DeclareLaunchArgument(
-        'sim_gnss_std_h_m', default_value='0.1',
+        'sim_gnss_std_h_m', default_value='0.08',
         description='Simulation GNSS horizontal std (meters)'
     )
     
     sim_gnss_std_u_m = DeclareLaunchArgument(
-        'sim_gnss_std_u_m', default_value='0.2',
+        'sim_gnss_std_u_m', default_value='0.10',
         description='Simulation GNSS vertical std (meters)'
     )
 
@@ -612,6 +724,7 @@ def generate_launch_description():
             'vehicle_odometry_topic': LaunchConfiguration('px4_vehicle_odometry_topic'),
             'velocity_topic': LaunchConfiguration('mavros_local_velocity_topic'),
             'output_topic': '/ekf2/pose',
+            'publish_pose': LaunchConfiguration('ekf2_relay_publish_pose'),
             # 默认用 node time，确保与 IEKF 同一时间基准
             'use_input_stamp': LaunchConfiguration('ekf2_use_input_stamp'),
             'use_covariance': False,
@@ -654,9 +767,31 @@ def generate_launch_description():
                 'armed_cruise_native_gnss_vel_override_enable': LaunchConfiguration('armed_cruise_native_gnss_vel_override_enable'),
                 'armed_cruise_gnss_pos_override_enable': LaunchConfiguration('armed_cruise_gnss_pos_override_enable'),
                 'armed_cruise_gnss_pos_std_h_m': LaunchConfiguration('armed_cruise_gnss_pos_std_h_m'),
+                'armed_cruise_gnss_pos_std_u_m': LaunchConfiguration('armed_cruise_gnss_pos_std_u_m'),
+                'armed_cruise_gnss_pos_residual_boost_enable': LaunchConfiguration('armed_cruise_gnss_pos_residual_boost_enable'),
+                'armed_cruise_gnss_pos_residual_boost_threshold_m': LaunchConfiguration('armed_cruise_gnss_pos_residual_boost_threshold_m'),
+                'armed_cruise_gnss_pos_residual_boost_hold_sec': LaunchConfiguration('armed_cruise_gnss_pos_residual_boost_hold_sec'),
                 'armed_cruise_native_gnss_vel_min_horizontal_speed_mps': LaunchConfiguration('armed_cruise_native_gnss_vel_min_horizontal_speed_mps'),
                 'armed_cruise_native_gnss_vel_std_h_mps': LaunchConfiguration('armed_cruise_native_gnss_vel_std_h_mps'),
                 'armed_cruise_native_gnss_vel_std_u_mps': LaunchConfiguration('armed_cruise_native_gnss_vel_std_u_mps'),
+                'armed_cruise_native_gnss_vel_residual_boost_enable': LaunchConfiguration('armed_cruise_native_gnss_vel_residual_boost_enable'),
+                'armed_cruise_native_gnss_vel_residual_boost_threshold_mps': LaunchConfiguration('armed_cruise_native_gnss_vel_residual_boost_threshold_mps'),
+                'armed_cruise_native_gnss_vel_residual_boost_hold_sec': LaunchConfiguration('armed_cruise_native_gnss_vel_residual_boost_hold_sec'),
+                'armed_cruise_native_gnss_vel_residual_boost_std_h_mps': LaunchConfiguration('armed_cruise_native_gnss_vel_residual_boost_std_h_mps'),
+                'armed_cruise_native_gnss_vel_residual_boost_std_u_mps': LaunchConfiguration('armed_cruise_native_gnss_vel_residual_boost_std_u_mps'),
+                'armed_cruise_vertical_cov_reopen_enable': LaunchConfiguration('armed_cruise_vertical_cov_reopen_enable'),
+                'armed_cruise_vertical_cov_reopen_threshold_m': LaunchConfiguration('armed_cruise_vertical_cov_reopen_threshold_m'),
+                'armed_cruise_vertical_cov_reopen_hold_sec': LaunchConfiguration('armed_cruise_vertical_cov_reopen_hold_sec'),
+                'armed_cruise_vertical_cov_reopen_pos_std_m': LaunchConfiguration('armed_cruise_vertical_cov_reopen_pos_std_m'),
+                'armed_cruise_vertical_cov_reopen_vel_std_mps': LaunchConfiguration('armed_cruise_vertical_cov_reopen_vel_std_mps'),
+                'armed_cruise_vertical_cov_reopen_accbias_std_z_mps2': LaunchConfiguration('armed_cruise_vertical_cov_reopen_accbias_std_z_mps2'),
+                'post_flight_vertical_cov_reopen_enable': LaunchConfiguration('post_flight_vertical_cov_reopen_enable'),
+                'post_flight_vertical_cov_reopen_threshold_m': LaunchConfiguration('post_flight_vertical_cov_reopen_threshold_m'),
+                'post_flight_vertical_cov_reopen_hold_sec': LaunchConfiguration('post_flight_vertical_cov_reopen_hold_sec'),
+                'post_flight_vertical_cov_reopen_grace_sec': LaunchConfiguration('post_flight_vertical_cov_reopen_grace_sec'),
+                'post_flight_vertical_cov_reopen_pos_std_m': LaunchConfiguration('post_flight_vertical_cov_reopen_pos_std_m'),
+                'post_flight_vertical_cov_reopen_vel_std_mps': LaunchConfiguration('post_flight_vertical_cov_reopen_vel_std_mps'),
+                'post_flight_vertical_cov_reopen_accbias_std_z_mps2': LaunchConfiguration('post_flight_vertical_cov_reopen_accbias_std_z_mps2'),
                 'tilt_force_relock_min_residual_deg': LaunchConfiguration('tilt_force_relock_min_residual_deg'),
                 'tilt_force_relock_roll_pitch_std_deg': LaunchConfiguration('tilt_force_relock_roll_pitch_std_deg'),
                 'tilt_force_relock_once_per_motion_context': LaunchConfiguration('tilt_force_relock_once_per_motion_context'),
@@ -691,12 +826,14 @@ def generate_launch_description():
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             'ekf2_pose_topic': '/ekf2/pose',
             'ekf2_odom_topic': '/ekf2/pose_odom',
+            'subscribe_ekf2_pose': LaunchConfiguration('comparison_subscribe_ekf2_pose'),
             'iekf_topic': '/kf_gins/odom',
             'iekf_raw_topic': LaunchConfiguration('iekf_raw_topic'),
             'iekf_fallback_topic': LaunchConfiguration('iekf_fallback_topic'),
             'comparison_output': '/comparison/metrics',
             'metrics_csv_path': LaunchConfiguration('comparison_csv_path'),
-            'metrics_publish_rate': 50,  # 50 Hz
+            'metrics_publish_rate': LaunchConfiguration('comparison_metrics_publish_rate'),
+            'metrics_log_period_sec': LaunchConfiguration('comparison_metrics_log_period_sec'),
             'sync_tolerance_ms': 50,
             'align_initial': True,
             'max_abs_position_m': 10000.0,
@@ -705,6 +842,8 @@ def generate_launch_description():
             'max_velocity_jump_mps': 100.0,
             'recompute_alignment_on_jump': True,
             'clear_error_history_on_realign': True,
+            'publish_live_metrics': LaunchConfiguration('comparison_publish_live_metrics'),
+            'publish_named_metrics': LaunchConfiguration('comparison_publish_named_metrics'),
             'aligned_fallback_raw': LaunchConfiguration('aligned_fallback_raw'),
             'publish_iekf_state': LaunchConfiguration('publish_iekf_state'),
             'publish_ekf2_state': LaunchConfiguration('publish_ekf2_state'),
@@ -881,6 +1020,10 @@ def generate_launch_description():
         publish_ekf2_state,
         publish_iekf_state,
         publish_aligned_iekf_state,
+        comparison_publish_named_metrics,
+        comparison_publish_live_metrics,
+        comparison_metrics_publish_rate,
+        comparison_metrics_log_period_sec,
         iekf_raw_topic,
         iekf_fallback_topic,
         comparison_csv_path,
@@ -888,15 +1031,38 @@ def generate_launch_description():
         armed_cruise_native_gnss_vel_override_enable,
         armed_cruise_gnss_pos_override_enable,
         armed_cruise_gnss_pos_std_h_m,
+        armed_cruise_gnss_pos_std_u_m,
+        armed_cruise_gnss_pos_residual_boost_enable,
+        armed_cruise_gnss_pos_residual_boost_threshold_m,
+        armed_cruise_gnss_pos_residual_boost_hold_sec,
         armed_cruise_native_gnss_vel_min_horizontal_speed_mps,
         armed_cruise_native_gnss_vel_std_h_mps,
         armed_cruise_native_gnss_vel_std_u_mps,
+        armed_cruise_native_gnss_vel_residual_boost_enable,
+        armed_cruise_native_gnss_vel_residual_boost_threshold_mps,
+        armed_cruise_native_gnss_vel_residual_boost_hold_sec,
+        armed_cruise_native_gnss_vel_residual_boost_std_h_mps,
+        armed_cruise_native_gnss_vel_residual_boost_std_u_mps,
+        armed_cruise_vertical_cov_reopen_enable,
+        armed_cruise_vertical_cov_reopen_threshold_m,
+        armed_cruise_vertical_cov_reopen_hold_sec,
+        armed_cruise_vertical_cov_reopen_pos_std_m,
+        armed_cruise_vertical_cov_reopen_vel_std_mps,
+        armed_cruise_vertical_cov_reopen_accbias_std_z_mps2,
+        post_flight_vertical_cov_reopen_enable,
+        post_flight_vertical_cov_reopen_threshold_m,
+        post_flight_vertical_cov_reopen_hold_sec,
+        post_flight_vertical_cov_reopen_grace_sec,
+        post_flight_vertical_cov_reopen_pos_std_m,
+        post_flight_vertical_cov_reopen_vel_std_mps,
+        post_flight_vertical_cov_reopen_accbias_std_z_mps2,
         tilt_force_relock_min_residual_deg,
         tilt_force_relock_roll_pitch_std_deg,
         tilt_force_relock_once_per_motion_context,
         tilt_force_relock_max_rate_hz,
         aligned_fallback_raw,
         ekf2_use_input_stamp,
+        ekf2_relay_publish_pose,
         imu_use_node_stamp,
         enable_imu_converter,
         mavros_imu_topic,
@@ -904,6 +1070,7 @@ def generate_launch_description():
         px4_sensor_combined_topic,
         px4_vehicle_imu_topic,
         px4_imu_qos_depth,
+        comparison_subscribe_ekf2_pose,
         mavros_gps_topic,
         gnss_relay_mode,
         gnss_source,

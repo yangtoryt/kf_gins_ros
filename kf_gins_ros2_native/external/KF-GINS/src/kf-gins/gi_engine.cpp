@@ -753,6 +753,36 @@ void GIEngine::forceRollPitch(double roll_rad, double pitch_rad, double roll_pit
     checkCov();
 }
 
+bool GIEngine::reopenVerticalCovariance(
+    double pos_std_m, double vel_std_mps, double accbias_std_z_mps2) {
+
+    const auto reopen_diag = [&](int idx, double std_value) {
+        if (!std::isfinite(std_value) || std_value <= 0.0) {
+            return false;
+        }
+        const double target_var = std_value * std_value;
+        if (!std::isfinite(target_var) || target_var <= 0.0) {
+            return false;
+        }
+        if (!std::isfinite(Cov_(idx, idx)) || Cov_(idx, idx) < target_var) {
+            Cov_(idx, idx) = target_var;
+            return true;
+        }
+        return false;
+    };
+
+    bool changed = false;
+    changed = reopen_diag(P_ID + 2, pos_std_m) || changed;
+    changed = reopen_diag(V_ID + 2, vel_std_mps) || changed;
+    changed = reopen_diag(BA_ID + 2, accbias_std_z_mps2) || changed;
+
+    if (changed) {
+        Cov_ = 0.5 * (Cov_ + Cov_.transpose());
+        checkCov();
+    }
+    return changed;
+}
+
 NavState GIEngine::getNavState() {
 
     NavState state;

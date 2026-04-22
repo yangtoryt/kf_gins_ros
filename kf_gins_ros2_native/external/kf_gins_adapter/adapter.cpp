@@ -305,11 +305,12 @@ public:
   {
     // GIEngine 使用 NED 速度
     Eigen::Vector3d vel_ned(vN, vE, vD);
-    // clamp std: N/E 最小 0.05 m/s，D 最小 0.10 m/s，避免数值问题同时保留晚段 tightening 空间
+    // clamp std: keep a small positive floor for numerical safety while still allowing
+    // tighter late-cruise GNSS velocity experiments when the caller explicitly requests them.
     Eigen::Vector3d std_clamped;
-    std_clamped << std::max(0.05, std::abs(std_vel.x())),
-                   std::max(0.05, std::abs(std_vel.y())),
-                   std::max(0.1, std::abs(std_vel.z()));
+    std_clamped << std::max(0.03, std::abs(std_vel.x())),
+                   std::max(0.03, std::abs(std_vel.y())),
+                   std::max(0.08, std::abs(std_vel.z()));
     engine_->addVelData(vel_ned, std_clamped, t);
     return true;
   }
@@ -345,6 +346,15 @@ public:
     last_time_ = t;
     fillState_(engine_->getNavState(), last_state_);
     return true;
+  }
+
+  bool reopenVerticalCovariance(double pos_std_m, double vel_std_mps,
+                                double accbias_std_z_mps2) override
+  {
+    if (!engine_) {
+      return false;
+    }
+    return engine_->reopenVerticalCovariance(pos_std_m, vel_std_mps, accbias_std_z_mps2);
   }
 
   // ★ 新增：实现接口所需 reset（不直接调私有 initialize）
@@ -398,6 +408,14 @@ public:
   }
 
   State current() const override { return last_state_; }
+
+  Eigen::MatrixXd covariance() const override
+  {
+    if (!engine_) {
+      return Eigen::MatrixXd();
+    }
+    return engine_->getCovariance();
+  }
 
   ObservationDebug lastObservationDebug() const override
   {

@@ -9,12 +9,15 @@ from typing import Deque, Optional, Tuple
 
 import rclpy
 from nav_msgs.msg import Odometry
+from rcl_interfaces.msg import ParameterDescriptor
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import NavSatFix, NavSatStatus
 
 
-EARTH_RADIUS_M = 6378137.0
+WGS84_A_M = 6378137.0
+WGS84_E2 = 6.69437999014e-3
 
 
 @dataclass
@@ -36,6 +39,15 @@ class PoseSample:
     z_m: float
 
 
+@dataclass
+class ErrorSample:
+    sample_index: int
+    ros_time_sec: float
+    error_x_m: float
+    error_y_m: float
+    error_z_m: float
+
+
 class GpsVsPoseProbe(Node):
     def __init__(self) -> None:
         super().__init__("gps_vs_pose_probe")
@@ -48,18 +60,42 @@ class GpsVsPoseProbe(Node):
         self.buffer_len = int(self.declare_parameter("buffer_len", 400).value)
         self.status_print_period_sec = float(self.declare_parameter("status_print_period_sec", 5.0).value)
         self.csv_flush_interval = max(1, int(self.declare_parameter("csv_flush_interval", 20).value))
+        dynamic_param = ParameterDescriptor(dynamic_typing=True)
+        self.global_alignment_holdoff_sec = max(
+            0.0,
+            float(
+                self.declare_parameter(
+                    "global_alignment_holdoff_sec", 0.0, descriptor=dynamic_param
+                ).value
+            ),
+        )
+        self.global_alignment_min_pairs = max(
+            1, int(self.declare_parameter("global_alignment_min_pairs", 1).value)
+        )
+        self.local_reanchor_window_sec = float(
+            self.declare_parameter("local_reanchor_window_sec", 25.0, descriptor=dynamic_param).value
+        )
 
         self.fix_buf: Deque[FixSample] = deque(maxlen=max(10, self.buffer_len))
         self.pose_buf: Deque[PoseSample] = deque(maxlen=max(10, self.buffer_len))
+        self.error_buf: Deque[ErrorSample] = deque(maxlen=max(10, self.buffer_len))
         self.last_pair_key: Optional[Tuple[float, float]] = None
 
         self.anchor_lat_rad: Optional[float] = None
         self.anchor_lon_rad: Optional[float] = None
         self.anchor_alt_m: Optional[float] = None
+        self.anchor_ecef_m: Optional[Tuple[float, float, float]] = None
 
         self.offset_x_m: Optional[float] = None
         self.offset_y_m: Optional[float] = None
         self.offset_z_m: Optional[float] = None
+        self.global_alignment_start_ros_time_sec: Optional[float] = None
+        self.global_alignment_pair_count = 0
+        self.global_alignment_sum_x_m = 0.0
+        self.global_alignment_sum_y_m = 0.0
+        self.global_alignment_sum_z_m = 0.0
+        self.global_alignment_anchor_sample_index: Optional[int] = None
+        self.global_alignment_anchor_ros_time_sec: Optional[float] = None
 
         self.samples_written = 0
         self.last_status_sec = 0.0
@@ -84,7 +120,10 @@ class GpsVsPoseProbe(Node):
             f"  gps_topic: {self.gps_topic}\n"
             f"  odom_topic: {self.odom_topic}\n"
             f"  csv_path: {self.csv_path or '(disabled)'}\n"
-            f"  sync_tolerance_sec: {self.sync_tolerance_sec:.3f}"
+            f"  sync_tolerance_sec: {self.sync_tolerance_sec:.3f}\n"
+            f"  global_alignment_holdoff_sec: {self.global_alignment_holdoff_sec:.3f}\n"
+            f"  global_alignment_min_pairs: {self.global_alignment_min_pairs}\n"
+            f"  local_reanchor_window_sec: {self.local_reanchor_window_sec:.3f}"
         )
 
     def _open_csv_if_needed(self) -> None:
@@ -110,6 +149,12 @@ class GpsVsPoseProbe(Node):
             "pose_x_m",
             "pose_y_m",
             "pose_z_m",
+            "global_alignment_ready",
+            "global_alignment_anchor_sample_index",
+            "global_alignment_anchor_ros_time_sec",
+            "global_alignment_anchor_pair_count",
+            "global_alignment_holdoff_sec",
+            "global_alignment_min_pairs",
             "pose_offset_x_m",
             "pose_offset_y_m",
             "pose_offset_z_m",
@@ -121,6 +166,15 @@ class GpsVsPoseProbe(Node):
             "error_z_m",
             "xy_error_m",
             "xyz_error_m",
+            "local_reanchor_window_sec",
+            "local_anchor_sample_index",
+            "local_anchor_ros_time_sec",
+            "local_anchor_age_sec",
+            "local_error_x_m",
+            "local_error_y_m",
+            "local_error_z_m",
+            "local_xy_error_m",
+            "local_xyz_error_m",
         ]
         self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=fieldnames)
         self.csv_writer.writeheader()
@@ -137,19 +191,47 @@ class GpsVsPoseProbe(Node):
             return False
         return msg.status.status != NavSatStatus.STATUS_NO_FIX
 
+    def _llh_to_ecef(self, lat_deg: float, lon_deg: float, alt_m: float) -> Tuple[float, float, float]:
+        lat_rad = math.radians(lat_deg)
+        lon_rad = math.radians(lon_deg)
+        sin_lat = math.sin(lat_rad)
+        cos_lat = math.cos(lat_rad)
+        sin_lon = math.sin(lon_rad)
+        cos_lon = math.cos(lon_rad)
+        prime_vertical_radius_m = WGS84_A_M / math.sqrt(1.0 - WGS84_E2 * sin_lat * sin_lat)
+        x_m = (prime_vertical_radius_m + alt_m) * cos_lat * cos_lon
+        y_m = (prime_vertical_radius_m + alt_m) * cos_lat * sin_lon
+        z_m = (prime_vertical_radius_m * (1.0 - WGS84_E2) + alt_m) * sin_lat
+        return x_m, y_m, z_m
+
     def _lla_to_local_enu(self, lat_deg: float, lon_deg: float, alt_m: float) -> Tuple[float, float, float]:
         assert self.anchor_lat_rad is not None
         assert self.anchor_lon_rad is not None
         assert self.anchor_alt_m is not None
+        assert self.anchor_ecef_m is not None
 
-        lat_rad = math.radians(lat_deg)
-        lon_rad = math.radians(lon_deg)
-        d_lat = lat_rad - self.anchor_lat_rad
-        d_lon = lon_rad - self.anchor_lon_rad
-        lat_avg = 0.5 * (lat_rad + self.anchor_lat_rad)
-        east_m = d_lon * math.cos(lat_avg) * EARTH_RADIUS_M
-        north_m = d_lat * EARTH_RADIUS_M
-        up_m = alt_m - self.anchor_alt_m
+        x_m, y_m, z_m = self._llh_to_ecef(lat_deg, lon_deg, alt_m)
+        anchor_x_m, anchor_y_m, anchor_z_m = self.anchor_ecef_m
+        dx_m = x_m - anchor_x_m
+        dy_m = y_m - anchor_y_m
+        dz_m = z_m - anchor_z_m
+
+        sin_lat0 = math.sin(self.anchor_lat_rad)
+        cos_lat0 = math.cos(self.anchor_lat_rad)
+        sin_lon0 = math.sin(self.anchor_lon_rad)
+        cos_lon0 = math.cos(self.anchor_lon_rad)
+
+        east_m = -sin_lon0 * dx_m + cos_lon0 * dy_m
+        north_m = (
+            -sin_lat0 * cos_lon0 * dx_m
+            - sin_lat0 * sin_lon0 * dy_m
+            + cos_lat0 * dz_m
+        )
+        up_m = (
+            cos_lat0 * cos_lon0 * dx_m
+            + cos_lat0 * sin_lon0 * dy_m
+            + sin_lat0 * dz_m
+        )
         return east_m, north_m, up_m
 
     def _find_closest_fix(self, target_sec: float) -> Tuple[Optional[FixSample], float]:
@@ -180,6 +262,109 @@ class GpsVsPoseProbe(Node):
             return None, best_dt
         return best, best_dt
 
+    def _update_global_alignment(
+        self,
+        sample_index: int,
+        ros_time_sec: float,
+        pose: PoseSample,
+        fix: FixSample,
+    ) -> bool:
+        if self.offset_x_m is not None:
+            return True
+
+        raw_offset_x_m = pose.x_m - fix.east_m
+        raw_offset_y_m = pose.y_m - fix.north_m
+        raw_offset_z_m = pose.z_m - fix.up_m
+
+        if self.global_alignment_start_ros_time_sec is None:
+            self.global_alignment_start_ros_time_sec = ros_time_sec
+        self.global_alignment_pair_count += 1
+        self.global_alignment_sum_x_m += raw_offset_x_m
+        self.global_alignment_sum_y_m += raw_offset_y_m
+        self.global_alignment_sum_z_m += raw_offset_z_m
+
+        elapsed_sec = ros_time_sec - self.global_alignment_start_ros_time_sec
+        if (
+            self.global_alignment_pair_count < self.global_alignment_min_pairs
+            or elapsed_sec < self.global_alignment_holdoff_sec
+        ):
+            return False
+
+        pair_count = float(self.global_alignment_pair_count)
+        self.offset_x_m = self.global_alignment_sum_x_m / pair_count
+        self.offset_y_m = self.global_alignment_sum_y_m / pair_count
+        self.offset_z_m = self.global_alignment_sum_z_m / pair_count
+        self.global_alignment_anchor_sample_index = sample_index
+        self.global_alignment_anchor_ros_time_sec = ros_time_sec
+        self.get_logger().info(
+            "Pose alignment fixed: dx=%.3f dy=%.3f dz=%.3f pairs=%d holdoff=%.3fs"
+            % (
+                self.offset_x_m,
+                self.offset_y_m,
+                self.offset_z_m,
+                self.global_alignment_pair_count,
+                self.global_alignment_holdoff_sec,
+            )
+        )
+        return True
+
+    def _compute_local_metrics(
+        self,
+        sample_index: int,
+        ros_time_sec: float,
+        error_x_m: float,
+        error_y_m: float,
+        error_z_m: float,
+    ) -> dict:
+        out = {
+            "local_anchor_sample_index": None,
+            "local_anchor_ros_time_sec": None,
+            "local_anchor_age_sec": None,
+            "local_error_x_m": float("nan"),
+            "local_error_y_m": float("nan"),
+            "local_error_z_m": float("nan"),
+            "local_xy_error_m": float("nan"),
+            "local_xyz_error_m": float("nan"),
+        }
+        if self.local_reanchor_window_sec <= 0.0:
+            return out
+
+        current = ErrorSample(
+            sample_index=sample_index,
+            ros_time_sec=ros_time_sec,
+            error_x_m=error_x_m,
+            error_y_m=error_y_m,
+            error_z_m=error_z_m,
+        )
+        self.error_buf.append(current)
+        while (
+            len(self.error_buf) > 1
+            and (ros_time_sec - self.error_buf[0].ros_time_sec) > self.local_reanchor_window_sec
+        ):
+            self.error_buf.popleft()
+
+        anchor = self.error_buf[0]
+        local_error_x_m = error_x_m - anchor.error_x_m
+        local_error_y_m = error_y_m - anchor.error_y_m
+        local_error_z_m = error_z_m - anchor.error_z_m
+        out.update(
+            {
+                "local_anchor_sample_index": anchor.sample_index,
+                "local_anchor_ros_time_sec": anchor.ros_time_sec,
+                "local_anchor_age_sec": ros_time_sec - anchor.ros_time_sec,
+                "local_error_x_m": local_error_x_m,
+                "local_error_y_m": local_error_y_m,
+                "local_error_z_m": local_error_z_m,
+                "local_xy_error_m": math.hypot(local_error_x_m, local_error_y_m),
+                "local_xyz_error_m": math.sqrt(
+                    local_error_x_m * local_error_x_m
+                    + local_error_y_m * local_error_y_m
+                    + local_error_z_m * local_error_z_m
+                ),
+            }
+        )
+        return out
+
     def _gps_callback(self, msg: NavSatFix) -> None:
         if not self._valid_fix(msg):
             return
@@ -188,6 +373,7 @@ class GpsVsPoseProbe(Node):
             self.anchor_lat_rad = math.radians(msg.latitude)
             self.anchor_lon_rad = math.radians(msg.longitude)
             self.anchor_alt_m = float(msg.altitude)
+            self.anchor_ecef_m = self._llh_to_ecef(msg.latitude, msg.longitude, msg.altitude)
             self.get_logger().info(
                 f"GPS anchor fixed at lat={msg.latitude:.8f} lon={msg.longitude:.8f} alt={msg.altitude:.3f}"
             )
@@ -225,32 +411,56 @@ class GpsVsPoseProbe(Node):
         if self.last_pair_key == pair_key:
             return
 
-        if self.offset_x_m is None:
-            self.offset_x_m = pose.x_m - fix.east_m
-            self.offset_y_m = pose.y_m - fix.north_m
-            self.offset_z_m = pose.z_m - fix.up_m
-            self.get_logger().info(
-                f"Pose alignment fixed: dx={self.offset_x_m:.3f} dy={self.offset_y_m:.3f} dz={self.offset_z_m:.3f}"
+        sample_index = self.samples_written + 1
+        ros_time_sec = self._ros_time_sec()
+        global_alignment_ready = self._update_global_alignment(sample_index, ros_time_sec, pose, fix)
+
+        aligned_pose_x_m = float("nan")
+        aligned_pose_y_m = float("nan")
+        aligned_pose_z_m = float("nan")
+        error_x_m = float("nan")
+        error_y_m = float("nan")
+        error_z_m = float("nan")
+        xy_error_m = float("nan")
+        xyz_error_m = float("nan")
+        local_metrics = {
+            "local_anchor_sample_index": None,
+            "local_anchor_ros_time_sec": None,
+            "local_anchor_age_sec": None,
+            "local_error_x_m": float("nan"),
+            "local_error_y_m": float("nan"),
+            "local_error_z_m": float("nan"),
+            "local_xy_error_m": float("nan"),
+            "local_xyz_error_m": float("nan"),
+        }
+
+        if global_alignment_ready:
+            assert self.offset_x_m is not None
+            assert self.offset_y_m is not None
+            assert self.offset_z_m is not None
+            aligned_pose_x_m = pose.x_m - self.offset_x_m
+            aligned_pose_y_m = pose.y_m - self.offset_y_m
+            aligned_pose_z_m = pose.z_m - self.offset_z_m
+
+            error_x_m = aligned_pose_x_m - fix.east_m
+            error_y_m = aligned_pose_y_m - fix.north_m
+            error_z_m = aligned_pose_z_m - fix.up_m
+            xy_error_m = math.hypot(error_x_m, error_y_m)
+            xyz_error_m = math.sqrt(
+                error_x_m * error_x_m + error_y_m * error_y_m + error_z_m * error_z_m
+            )
+            local_metrics = self._compute_local_metrics(
+                sample_index, ros_time_sec, error_x_m, error_y_m, error_z_m
             )
 
-        aligned_pose_x_m = pose.x_m - self.offset_x_m
-        aligned_pose_y_m = pose.y_m - self.offset_y_m
-        aligned_pose_z_m = pose.z_m - self.offset_z_m
-
-        error_x_m = aligned_pose_x_m - fix.east_m
-        error_y_m = aligned_pose_y_m - fix.north_m
-        error_z_m = aligned_pose_z_m - fix.up_m
-        xy_error_m = math.hypot(error_x_m, error_y_m)
-        xyz_error_m = math.sqrt(error_x_m * error_x_m + error_y_m * error_y_m + error_z_m * error_z_m)
-
         self.last_pair_key = pair_key
-        self.samples_written += 1
+        self.samples_written = sample_index
 
         if self.csv_writer is not None:
             self.csv_writer.writerow(
                 {
-                    "sample_index": self.samples_written,
-                    "ros_time_sec": self._ros_time_sec(),
+                    "sample_index": sample_index,
+                    "ros_time_sec": ros_time_sec,
                     "gps_stamp_sec": fix.stamp_sec,
                     "pose_stamp_sec": pose.stamp_sec,
                     "pair_dt_ms": dt_sec * 1000.0,
@@ -263,6 +473,12 @@ class GpsVsPoseProbe(Node):
                     "pose_x_m": pose.x_m,
                     "pose_y_m": pose.y_m,
                     "pose_z_m": pose.z_m,
+                    "global_alignment_ready": int(global_alignment_ready),
+                    "global_alignment_anchor_sample_index": self.global_alignment_anchor_sample_index,
+                    "global_alignment_anchor_ros_time_sec": self.global_alignment_anchor_ros_time_sec,
+                    "global_alignment_anchor_pair_count": self.global_alignment_pair_count,
+                    "global_alignment_holdoff_sec": self.global_alignment_holdoff_sec,
+                    "global_alignment_min_pairs": self.global_alignment_min_pairs,
                     "pose_offset_x_m": self.offset_x_m,
                     "pose_offset_y_m": self.offset_y_m,
                     "pose_offset_z_m": self.offset_z_m,
@@ -274,6 +490,15 @@ class GpsVsPoseProbe(Node):
                     "error_z_m": error_z_m,
                     "xy_error_m": xy_error_m,
                     "xyz_error_m": xyz_error_m,
+                    "local_reanchor_window_sec": self.local_reanchor_window_sec,
+                    "local_anchor_sample_index": local_metrics["local_anchor_sample_index"],
+                    "local_anchor_ros_time_sec": local_metrics["local_anchor_ros_time_sec"],
+                    "local_anchor_age_sec": local_metrics["local_anchor_age_sec"],
+                    "local_error_x_m": local_metrics["local_error_x_m"],
+                    "local_error_y_m": local_metrics["local_error_y_m"],
+                    "local_error_z_m": local_metrics["local_error_z_m"],
+                    "local_xy_error_m": local_metrics["local_xy_error_m"],
+                    "local_xyz_error_m": local_metrics["local_xyz_error_m"],
                 }
             )
             self.rows_since_flush += 1
@@ -281,12 +506,16 @@ class GpsVsPoseProbe(Node):
                 self.csv_file.flush()
                 self.rows_since_flush = 0
 
-        now_sec = self._ros_time_sec()
+        now_sec = ros_time_sec
         if now_sec - self.last_status_sec >= self.status_print_period_sec:
             self.last_status_sec = now_sec
+            local_xy_error_m = local_metrics["local_xy_error_m"]
+            xy_text = f"{xy_error_m:.3f}" if math.isfinite(xy_error_m) else "nan"
+            local_text = f"{local_xy_error_m:.3f}" if math.isfinite(local_xy_error_m) else "nan"
             self.get_logger().info(
                 f"samples={self.samples_written} topic={self.odom_topic} "
-                f"xy_error_m={xy_error_m:.3f} xyz_error_m={xyz_error_m:.3f} pair_dt_ms={dt_sec * 1000.0:.1f}"
+                f"xy_error_m={xy_text} local_xy_error_m={local_text} "
+                f"xyz_error_m={xyz_error_m:.3f} pair_dt_ms={dt_sec * 1000.0:.1f}"
             )
 
     def destroy_node(self) -> bool:
@@ -303,6 +532,8 @@ def main() -> None:
     node = GpsVsPoseProbe()
     try:
         rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
     finally:
         node.destroy_node()
         rclpy.try_shutdown()

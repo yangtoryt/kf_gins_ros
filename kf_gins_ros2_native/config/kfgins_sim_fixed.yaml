@@ -7,7 +7,7 @@ kf_gins_node:
     use_zero_velocity_update_when_disarmed: true  # 无人机未启动时应用零速度约束
     zupt_reset_interval_sec: 1.0    # 地面 ZUPT 复位间隔（秒）
     zupt_std_mps: 0.05              # 预留：未来可接入真 ZUPT 观测
-    disarmed_yaw_lock_enable: false
+    disarmed_yaw_lock_enable: true
     disarmed_yaw_lock_interval_sec: 1.0
     disarmed_yaw_lock_max_yaw_err_deg: 5.0
     force_zero_antlever: true
@@ -16,11 +16,30 @@ kf_gins_node:
     gnss_vel_std_floor_u_mps: 0.15
     native_gnss_speed_std_scale: 0.4
     armed_cruise_native_gnss_vel_override_enable: true
-    armed_cruise_gnss_pos_override_enable: false
+    armed_cruise_gnss_pos_override_enable: true
     armed_cruise_gnss_pos_std_h_m: 0.06
+    armed_cruise_gnss_pos_std_u_m: 0.08
     armed_cruise_native_gnss_vel_min_horizontal_speed_mps: 0.5
     armed_cruise_native_gnss_vel_std_h_mps: 0.05
     armed_cruise_native_gnss_vel_std_u_mps: 0.10
+    armed_cruise_native_gnss_vel_residual_boost_enable: true
+    armed_cruise_native_gnss_vel_residual_boost_threshold_mps: 0.10
+    armed_cruise_native_gnss_vel_residual_boost_hold_sec: 8.0
+    armed_cruise_native_gnss_vel_residual_boost_std_h_mps: 0.03
+    armed_cruise_native_gnss_vel_residual_boost_std_u_mps: 0.08
+    armed_cruise_vertical_cov_reopen_enable: true
+    armed_cruise_vertical_cov_reopen_threshold_m: 0.15
+    armed_cruise_vertical_cov_reopen_hold_sec: 8.0
+    armed_cruise_vertical_cov_reopen_pos_std_m: 0.15
+    armed_cruise_vertical_cov_reopen_vel_std_mps: 0.10
+    armed_cruise_vertical_cov_reopen_accbias_std_z_mps2: 0.05
+    post_flight_vertical_cov_reopen_enable: true
+    post_flight_vertical_cov_reopen_threshold_m: 0.12
+    post_flight_vertical_cov_reopen_hold_sec: 20.0
+    post_flight_vertical_cov_reopen_grace_sec: 30.0
+    post_flight_vertical_cov_reopen_pos_std_m: 0.25
+    post_flight_vertical_cov_reopen_vel_std_mps: 0.10
+    post_flight_vertical_cov_reopen_accbias_std_z_mps2: 0.05
     use_online_reset_covariance: true
     reset_pos_std_m: 5.0
     reset_vel_std_mps: 5.0
@@ -41,10 +60,11 @@ kf_gins_node:
     heading_post_turn_reacquire_window_sec: 2.0
     heading_post_turn_reacquire_max_residual_deg: 45.0
     heading_post_turn_reacquire_std_deg: 1.5
+    heading_post_turn_cruise_track_std_deg: 1.0
     heading_post_turn_reacquire_hold_sec: 4.0
     heading_post_turn_reacquire_max_rate_hz: 5.0
     heading_post_turn_force_relock_enable: true
-    heading_post_turn_force_relock_min_residual_deg: 4.0
+    heading_post_turn_force_relock_min_residual_deg: 1.1
     heading_post_turn_force_relock_min_consecutive_blocks: 3
     heading_post_turn_force_relock_yaw_std_deg: 1.5
     heading_post_turn_force_relock_max_rate_hz: 1.0
@@ -61,7 +81,8 @@ kf_gins_node:
     heading_armed_cruise_force_relock_yaw_std_deg: 1.5
     heading_armed_cruise_force_relock_max_rate_hz: 1.0
     heading_underreaction_force_relock_enable: true
-    heading_underreaction_force_relock_min_residual_deg: 1.0
+    heading_underreaction_force_relock_min_residual_deg: 1.1
+    heading_post_turn_soft_underreaction_min_residual_deg: 1.2
     heading_underreaction_force_relock_min_remaining_ratio: 0.85
     heading_underreaction_force_relock_yaw_std_deg: 1.5
     heading_underreaction_force_relock_max_rate_hz: 4.0

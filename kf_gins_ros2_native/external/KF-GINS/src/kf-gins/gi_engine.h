@@ -182,6 +182,16 @@ public:
     void forceRollPitch(double roll_rad, double pitch_rad, double roll_pitch_std_rad, double time);
 
     /**
+     * @brief 重开垂向位置/速度/加速度零偏协方差
+     *        reopen vertical position/velocity/acc-bias covariance
+     * @param [in] pos_std_m           target vertical position std
+     * @param [in] vel_std_mps         target vertical velocity std
+     * @param [in] accbias_std_z_mps2  target vertical accelerometer bias std
+     * @return true if any covariance diagonal entry was increased
+     * */
+    bool reopenVerticalCovariance(double pos_std_m, double vel_std_mps, double accbias_std_z_mps2);
+
+    /**
      * @brief 获取当前时间
      *        get current time
      * */
@@ -343,23 +353,23 @@ private:
 private:
     GINSOptions options_;
 
-    double timestamp_;
+    double timestamp_{0.0};
 
     // 更新时间对齐误差，IMU状态和观测信息误差小于它则认为两者对齐
     // updata time align error
     const double TIME_ALIGN_ERR = 0.001;
 
-    // IMU和GNSS原始数据
-    // raw imudata and gnssdata
-    IMU imupre_;
-    IMU imucur_;
-    GNSS gnssdata_;
+    // IMU/GNSS raw samples participate in the very first post-reset update decision.
+    // Keep them value-initialized so reset -> first GNSS/IMU cannot read indeterminate data.
+    IMU imupre_{};
+    IMU imucur_{};
+    GNSS gnssdata_{};
 
     // IMU状态（位置、速度、姿态和IMU误差）
     // imu state (position, velocity, attitude and imu error)
-    PVA pvacur_;
-    PVA pvapre_;
-    ImuError imuerror_;
+    PVA pvacur_{};
+    PVA pvapre_{};
+    ImuError imuerror_{};
 
     // Kalman滤波相关
     // ekf variables

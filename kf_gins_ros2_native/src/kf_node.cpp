@@ -186,12 +186,56 @@ public:
       this->declare_parameter<bool>("armed_cruise_gnss_pos_override_enable", false);
     armed_cruise_gnss_pos_std_h_m_ =
       this->declare_parameter<double>("armed_cruise_gnss_pos_std_h_m", 0.06);
+    armed_cruise_gnss_pos_std_u_m_ =
+      this->declare_parameter<double>("armed_cruise_gnss_pos_std_u_m", 0.08);
+    armed_cruise_gnss_pos_residual_boost_enable_ =
+      this->declare_parameter<bool>("armed_cruise_gnss_pos_residual_boost_enable", false);
+    armed_cruise_gnss_pos_residual_boost_threshold_m_ =
+      this->declare_parameter<double>("armed_cruise_gnss_pos_residual_boost_threshold_m", 0.12);
+    armed_cruise_gnss_pos_residual_boost_hold_sec_ =
+      this->declare_parameter<double>("armed_cruise_gnss_pos_residual_boost_hold_sec", 20.0);
     armed_cruise_native_gnss_vel_min_horizontal_speed_mps_ =
       this->declare_parameter<double>("armed_cruise_native_gnss_vel_min_horizontal_speed_mps", 0.5);
     armed_cruise_native_gnss_vel_std_h_mps_ =
       this->declare_parameter<double>("armed_cruise_native_gnss_vel_std_h_mps", 0.05);
     armed_cruise_native_gnss_vel_std_u_mps_ =
       this->declare_parameter<double>("armed_cruise_native_gnss_vel_std_u_mps", 0.10);
+    armed_cruise_native_gnss_vel_residual_boost_enable_ =
+      this->declare_parameter<bool>("armed_cruise_native_gnss_vel_residual_boost_enable", false);
+    armed_cruise_native_gnss_vel_residual_boost_threshold_mps_ =
+      this->declare_parameter<double>("armed_cruise_native_gnss_vel_residual_boost_threshold_mps", 0.10);
+    armed_cruise_native_gnss_vel_residual_boost_hold_sec_ =
+      this->declare_parameter<double>("armed_cruise_native_gnss_vel_residual_boost_hold_sec", 8.0);
+    armed_cruise_native_gnss_vel_residual_boost_std_h_mps_ =
+      this->declare_parameter<double>("armed_cruise_native_gnss_vel_residual_boost_std_h_mps", 0.03);
+    armed_cruise_native_gnss_vel_residual_boost_std_u_mps_ =
+      this->declare_parameter<double>("armed_cruise_native_gnss_vel_residual_boost_std_u_mps", 0.08);
+    armed_cruise_vertical_cov_reopen_enable_ =
+      this->declare_parameter<bool>("armed_cruise_vertical_cov_reopen_enable", false);
+    armed_cruise_vertical_cov_reopen_threshold_m_ =
+      this->declare_parameter<double>("armed_cruise_vertical_cov_reopen_threshold_m", 0.15);
+    armed_cruise_vertical_cov_reopen_hold_sec_ =
+      this->declare_parameter<double>("armed_cruise_vertical_cov_reopen_hold_sec", 8.0);
+    armed_cruise_vertical_cov_reopen_pos_std_m_ =
+      this->declare_parameter<double>("armed_cruise_vertical_cov_reopen_pos_std_m", 0.15);
+    armed_cruise_vertical_cov_reopen_vel_std_mps_ =
+      this->declare_parameter<double>("armed_cruise_vertical_cov_reopen_vel_std_mps", 0.10);
+    armed_cruise_vertical_cov_reopen_accbias_std_z_mps2_ =
+      this->declare_parameter<double>("armed_cruise_vertical_cov_reopen_accbias_std_z_mps2", 0.05);
+    post_flight_vertical_cov_reopen_enable_ =
+      this->declare_parameter<bool>("post_flight_vertical_cov_reopen_enable", true);
+    post_flight_vertical_cov_reopen_threshold_m_ =
+      this->declare_parameter<double>("post_flight_vertical_cov_reopen_threshold_m", 0.12);
+    post_flight_vertical_cov_reopen_hold_sec_ =
+      this->declare_parameter<double>("post_flight_vertical_cov_reopen_hold_sec", 20.0);
+    post_flight_vertical_cov_reopen_grace_sec_ =
+      this->declare_parameter<double>("post_flight_vertical_cov_reopen_grace_sec", 30.0);
+    post_flight_vertical_cov_reopen_pos_std_m_ =
+      this->declare_parameter<double>("post_flight_vertical_cov_reopen_pos_std_m", 0.25);
+    post_flight_vertical_cov_reopen_vel_std_mps_ =
+      this->declare_parameter<double>("post_flight_vertical_cov_reopen_vel_std_mps", 0.10);
+    post_flight_vertical_cov_reopen_accbias_std_z_mps2_ =
+      this->declare_parameter<double>("post_flight_vertical_cov_reopen_accbias_std_z_mps2", 0.05);
     gnss_update_debug_csv_path_ =
       this->declare_parameter<std::string>("gnss_update_debug_csv_path", "");
     use_online_reset_covariance_ = this->declare_parameter<bool>("use_online_reset_covariance", true);
@@ -225,6 +269,9 @@ public:
       this->declare_parameter<double>("heading_post_turn_reacquire_max_residual_deg", 45.0);
     heading_post_turn_reacquire_std_deg_ =
       this->declare_parameter<double>("heading_post_turn_reacquire_std_deg", 2.0);
+    heading_post_turn_cruise_track_std_deg_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_cruise_track_std_deg", heading_post_turn_reacquire_std_deg_);
     heading_post_turn_reacquire_hold_sec_ =
       this->declare_parameter<double>("heading_post_turn_reacquire_hold_sec", 4.0);
     heading_post_turn_reacquire_max_rate_hz_ =
@@ -267,6 +314,10 @@ public:
       this->declare_parameter<bool>("heading_underreaction_force_relock_enable", true);
     heading_underreaction_force_relock_min_residual_deg_ =
       this->declare_parameter<double>("heading_underreaction_force_relock_min_residual_deg", 1.5);
+    heading_post_turn_soft_underreaction_min_residual_deg_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_soft_underreaction_min_residual_deg",
+        heading_underreaction_force_relock_min_residual_deg_);
     heading_underreaction_force_relock_min_remaining_ratio_ =
       this->declare_parameter<double>("heading_underreaction_force_relock_min_remaining_ratio", 0.85);
     heading_underreaction_force_relock_yaw_std_deg_ =
@@ -725,6 +776,7 @@ private:
   void mavrosStateCb(const mavros_msgs::msg::State::SharedPtr msg)
   {
     const bool prev_armed = mavros_armed_;
+    const double now_sec = now().seconds();
     mavros_armed_ = msg->armed;
 
     if (prev_armed != mavros_armed_) {
@@ -743,6 +795,21 @@ private:
       last_post_turn_force_relock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
       heading_large_residual_skip_count_ = 0;
       post_turn_blocked_count_ = 0;
+    }
+
+    if (!prev_armed && mavros_armed_) {
+      have_completed_armed_flight_since_reset_ = true;
+      last_armed_transition_time_sec_ = now_sec;
+      last_disarmed_transition_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+      post_flight_vertical_cov_reopen_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+    } else if (prev_armed && !mavros_armed_) {
+      last_disarmed_transition_time_sec_ = now_sec;
+      if (post_flight_vertical_cov_reopen_enable_ && have_completed_armed_flight_since_reset_) {
+        post_flight_vertical_cov_reopen_until_sec_ =
+          now_sec + std::max(0.0, post_flight_vertical_cov_reopen_hold_sec_);
+      } else {
+        post_flight_vertical_cov_reopen_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+      }
     }
 
     if (clear_path_on_arm_transition_ && prev_armed != mavros_armed_) {
@@ -1074,6 +1141,7 @@ private:
     last_post_turn_force_relock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     heading_large_residual_skip_count_ = 0;
     post_turn_blocked_count_ = 0;
+    post_flight_vertical_cov_reopen_until_sec_ = std::numeric_limits<double>::quiet_NaN();
 
     publishResetEvent_("disarmed yaw lock");
     clearPath_("disarmed yaw lock");
@@ -1097,6 +1165,11 @@ private:
     }
     prefer_preserved_yaw_on_next_core_reset_ =
       mavros_armed_ && std::isfinite(last_trusted_core_yaw_deg_);
+    have_completed_armed_flight_since_reset_ = mavros_armed_;
+    last_armed_transition_time_sec_ =
+      mavros_armed_ ? now().seconds() : std::numeric_limits<double>::quiet_NaN();
+    last_disarmed_transition_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    post_flight_vertical_cov_reopen_until_sec_ = std::numeric_limits<double>::quiet_NaN();
 
     have_prev_imu_ = false;
     have_raw_time_zero_ = false;
@@ -1352,6 +1425,33 @@ private:
     }
 
     const double residual_abs_deg = std::abs(yaw_residual_deg);
+    const bool risky_armed_plain_heading_context =
+      mavros_armed_ &&
+      motion_ctx.vertical_dominant_low_horizontal_motion &&
+      !motion_ctx.post_turn_cruise_motion_ok &&
+      !armed_cruise_force_relock_context;
+    const double risky_armed_plain_heading_skip_min_residual_deg =
+      std::max(
+        0.0,
+        post_turn_context
+          ? heading_post_turn_force_relock_min_residual_deg_
+          : heading_underreaction_force_relock_min_residual_deg_);
+    if (risky_armed_plain_heading_context &&
+        residual_abs_deg >= risky_armed_plain_heading_skip_min_residual_deg) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 1000,
+        "Skip heading update: risky low-horizontal / vertical-dominant armed window "
+        "(residual=%.2f deg, turning=%s, recent_turning=%s, horiz=%.2f m/s, vert=%.2f m/s, "
+        "gyro=%.2f deg/s, source_yaw_rate=%.2f deg/s)",
+        yaw_residual_deg,
+        turning_now ? "true" : "false",
+        recent_turning ? "true" : "false",
+        last_mavros_horizontal_speed_mps_,
+        last_mavros_vertical_speed_mps_,
+        last_imu_gyro_norm_deg_s_,
+        last_mavros_heading_rate_deg_s_);
+      return;
+    }
     double heading_measurement_deg = raw_heading_deg;
     double heading_measurement_std_deg = heading_update_std_deg_;
     bool recovery_update = false;
@@ -1361,12 +1461,30 @@ private:
     // 正常 innovation gate 内也允许在关键阶段加大 heading 观测权重：
     // 1. turn/post-turn 段快速把姿态重新拉回 source，避免 turn 后 residual 留在几度量级；
     // 2. armed cruise 段 residual 累积到阈值后，主动提高 heading 约束，抑制后续 XY 漂移。
-    if (mavros_armed_ && (turning_now || post_turn_context)) {
-      const double turn_track_std_deg =
-        std::max(0.1, std::abs(heading_post_turn_reacquire_std_deg_));
-      if (turn_track_std_deg < heading_measurement_std_deg) {
-        heading_measurement_std_deg = turn_track_std_deg;
-        heading_mode = turning_now ? "turn_track" : "post_turn_track";
+    if (mavros_armed_) {
+      if (turning_now &&
+          (motion_ctx.turn_track_motion_ok ||
+           residual_abs_deg < std::max(0.0, heading_post_turn_force_relock_min_residual_deg_))) {
+        const double turn_track_std_deg =
+          std::max(0.1, std::abs(heading_post_turn_reacquire_std_deg_));
+        if (turn_track_std_deg < heading_measurement_std_deg) {
+          heading_measurement_std_deg = turn_track_std_deg;
+          heading_mode = "turn_track";
+        }
+      } else if (post_turn_context && motion_ctx.post_turn_track_motion_ok) {
+        const bool post_turn_cruise_track_context = motion_ctx.post_turn_cruise_motion_ok;
+        const double post_turn_track_std_deg =
+          std::max(
+            0.1,
+            std::abs(
+              post_turn_cruise_track_context
+                ? heading_post_turn_cruise_track_std_deg_
+                : heading_post_turn_reacquire_std_deg_));
+        if (post_turn_track_std_deg < heading_measurement_std_deg) {
+          heading_measurement_std_deg = post_turn_track_std_deg;
+          heading_mode =
+            post_turn_cruise_track_context ? "post_turn_cruise_track" : "post_turn_track";
+        }
       }
     }
 
@@ -1712,11 +1830,46 @@ private:
       heading_underreaction_force_relock_max_source_yaw_rate_deg_s_ <= 0.0 ||
       std::abs(last_mavros_heading_rate_deg_s_) <=
         heading_underreaction_force_relock_max_source_yaw_rate_deg_s_;
-    const bool heading_update_underreacted =
+    // Underreaction relock is useful in stable armed segments, but manual21
+    // and manual23 showed that letting it fire anywhere inside post-turn
+    // hold/recent-turn windows creates regressions, especially in climb/descent
+    // edges that are not really settled cruise. Keep the earlier post-turn
+    // threshold only for recent-turn samples that already look like stable
+    // cruise motion. Softer recent-turn samples still benefit from a
+    // follow-up relock, but manual28 showed they need a higher residual gate
+    // than steady cruise. manual30 then showed the remaining generic path also
+    // needs to stay inside stable armed-cruise motion; low-speed vertical
+    // edges should not reuse the steady-cruise 1.0 deg relock.
+    const bool underreaction_in_post_turn_context =
+      heading_post_turn_force_relock_enable_ &&
+      recent_turning &&
+      motion_ctx.post_turn_cruise_motion_ok;
+    const bool soft_post_turn_underreaction_context =
       heading_underreaction_force_relock_enable_ &&
+      recent_turning &&
+      motion_ctx.post_turn_underreaction_motion_ok &&
+      !motion_ctx.post_turn_cruise_motion_ok;
+    const bool generic_underreaction_allowed =
+      heading_underreaction_force_relock_enable_ &&
+      !recent_turning &&
+      armed_cruise_force_relock_context;
+    double underreaction_min_residual_deg =
+      std::max(0.0, heading_underreaction_force_relock_min_residual_deg_);
+    if (soft_post_turn_underreaction_context) {
+      underreaction_min_residual_deg =
+        std::max(0.0, heading_post_turn_soft_underreaction_min_residual_deg_);
+    }
+    if (underreaction_in_post_turn_context) {
+      underreaction_min_residual_deg =
+        std::max(0.0, heading_post_turn_force_relock_min_residual_deg_);
+    }
+    const bool heading_update_underreacted =
       mavros_armed_ &&
       !turning_now &&
-      residual_abs_deg >= std::max(0.0, heading_underreaction_force_relock_min_residual_deg_) &&
+      (underreaction_in_post_turn_context ||
+       soft_post_turn_underreaction_context ||
+       generic_underreaction_allowed) &&
+      residual_abs_deg >= underreaction_min_residual_deg &&
       residual_after_abs_deg >=
         residual_abs_deg * std::clamp(heading_underreaction_force_relock_min_remaining_ratio_, 0.0, 1.0) &&
       underreaction_rate_ok &&
@@ -2080,6 +2233,14 @@ private:
       prev_imu_time_ = raw_t;
     }
 
+    last_processed_imu_raw_dt_sec_ = dt_candidate;
+    last_processed_imu_effective_dt_sec_ = std::numeric_limits<double>::quiet_NaN();
+    last_medium_imu_gap_dropped_dt_sec_ = 0.0;
+    last_medium_imu_gap_active_ = false;
+    last_medium_imu_gap_segmented_ = false;
+    last_medium_imu_gap_conservative_single_step_ = false;
+    last_medium_imu_gap_segmented_steps_ = 1;
+
     bool bridge_delta_source_gap_as_rates = false;
     if (sample.data_is_delta && use_source_sample_dt && std::isfinite(imu_gap.input_dt_sec)) {
       if (auto_reset_on_time_jump_ &&
@@ -2198,6 +2359,7 @@ private:
         "IMU dt invalid (dt=%.6f s). Using estimate %.6f s.",
         dt, imu_dt_estimate_sec_);
       dt = imu_dt_estimate_sec_;
+      last_processed_imu_effective_dt_sec_ = dt;
     } else if (dt > max_imu_dt_sec_) {
       // Distinguish between the current "slow-but-recurring" ~0.12 s input cadence
       // and genuinely dangerous larger gaps. The former may be clamped to preserve
@@ -2221,6 +2383,10 @@ private:
         dt = std::clamp(max_imu_dt_sec_, min_imu_dt_sec_, max_imu_dt_sec_);
         segmented_propagation_steps = 1;
         use_segmented_propagation = false;
+        last_medium_imu_gap_active_ = true;
+        last_medium_imu_gap_conservative_single_step_ = true;
+        last_medium_imu_gap_dropped_dt_sec_ = dropped_dt;
+        last_processed_imu_effective_dt_sec_ = dt;
         RCLCPP_WARN_THROTTLE(
           get_logger(), *get_clock(), 1000,
           "Medium IMU gap during vertical/accel maneuver: raw dt=%.6f s exceeds max %.6f s. "
@@ -2239,6 +2405,10 @@ private:
           2, static_cast<int>(std::ceil(dt / std::max(1e-6, max_imu_dt_sec_))));
         use_segmented_propagation = segmented_propagation_steps > 1;
         const double dt_step = dt / static_cast<double>(segmented_propagation_steps);
+        last_medium_imu_gap_active_ = true;
+        last_medium_imu_gap_segmented_ = use_segmented_propagation;
+        last_medium_imu_gap_segmented_steps_ = segmented_propagation_steps;
+        last_processed_imu_effective_dt_sec_ = dt_step;
         RCLCPP_WARN_THROTTLE(
           get_logger(), *get_clock(), 1000,
           "Medium IMU gap: dt=%.6f s exceeds max %.6f s. Using segmented propagation with %d steps "
@@ -2255,6 +2425,7 @@ private:
       }
     } else {
       dt = std::clamp(dt, min_imu_dt_sec_, max_imu_dt_sec_);
+      last_processed_imu_effective_dt_sec_ = dt;
       // EMA 更新估计值：新的valid dt贡献20%，历史贡献80%
       // 改为0.8 alpha，降低EMA权重，让估计值更快适应dt变化
       imu_dt_estimate_sec_ = 0.80 * imu_dt_estimate_sec_ + 0.20 * dt;
@@ -2382,6 +2553,10 @@ private:
       core_initialized_ = true;
       reset_this_gnss = true;
       prefer_preserved_yaw_on_next_core_reset_ = false;
+      have_completed_armed_flight_since_reset_ = false;
+      last_armed_transition_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+      last_disarmed_transition_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+      post_flight_vertical_cov_reopen_until_sec_ = std::numeric_limits<double>::quiet_NaN();
       last_disarmed_yaw_lock_time_sec_ = now().seconds();
       RCLCPP_INFO(
         this->get_logger(),
@@ -2409,10 +2584,208 @@ private:
 
     const HeadingMotionContext motion_ctx = buildHeadingMotionContext_(now_sec, false);
     const bool position_override_context =
-      motion_ctx.post_turn_context ||
-      (motion_ctx.armed_cruise_force_relock_context &&
-       motion_ctx.armed_cruise_force_relock_gyro_ok &&
-       motion_ctx.armed_cruise_force_relock_source_rate_ok);
+      mavros_armed_ &&
+      motion_ctx.have_fresh_mavros_speed;
+    const bool position_residual_boost_context = position_override_context;
+
+    double last_position_residual_h_m = std::numeric_limits<double>::quiet_NaN();
+    double last_position_residual_u_m = std::numeric_limits<double>::quiet_NaN();
+    double last_velocity_residual_h_mps = std::numeric_limits<double>::quiet_NaN();
+    double last_velocity_residual_e_mps = std::numeric_limits<double>::quiet_NaN();
+    double last_velocity_residual_d_mps = std::numeric_limits<double>::quiet_NaN();
+    if (core_) {
+      const kfcore::ObservationDebug last_observation_debug = core_->lastObservationDebug();
+      if (last_observation_debug.valid && last_observation_debug.gnss_position_applied) {
+        const double residual_n_m = last_observation_debug.gnss_position_residual_neu_m.x();
+        const double residual_e_m = last_observation_debug.gnss_position_residual_neu_m.y();
+        if (std::isfinite(residual_n_m) && std::isfinite(residual_e_m)) {
+          last_position_residual_h_m = std::hypot(residual_n_m, residual_e_m);
+        }
+        const double residual_u_m = last_observation_debug.gnss_position_residual_neu_m.z();
+        if (std::isfinite(residual_u_m)) {
+          last_position_residual_u_m = std::abs(residual_u_m);
+        }
+      }
+      if (last_observation_debug.valid && last_observation_debug.gnss_velocity_applied) {
+        const double residual_n_mps = last_observation_debug.gnss_velocity_residual_ned_mps.x();
+        const double residual_e_mps = last_observation_debug.gnss_velocity_residual_ned_mps.y();
+        const double residual_d_mps = last_observation_debug.gnss_velocity_residual_ned_mps.z();
+        if (std::isfinite(residual_n_mps) && std::isfinite(residual_e_mps)) {
+          last_velocity_residual_h_mps = std::hypot(residual_n_mps, residual_e_mps);
+          last_velocity_residual_e_mps = residual_e_mps;
+        }
+        if (std::isfinite(residual_d_mps)) {
+          last_velocity_residual_d_mps = residual_d_mps;
+        }
+      }
+    }
+
+    if (armed_cruise_gnss_pos_residual_boost_enable_ &&
+        position_residual_boost_context &&
+        ((std::isfinite(last_position_residual_h_m) &&
+          last_position_residual_h_m >=
+            std::max(0.0, armed_cruise_gnss_pos_residual_boost_threshold_m_)) ||
+         (std::isfinite(last_position_residual_u_m) &&
+          last_position_residual_u_m >=
+            std::max(0.0, armed_cruise_gnss_pos_residual_boost_threshold_m_)))) {
+      armed_cruise_gnss_pos_residual_boost_until_sec_ =
+        now_sec + std::max(0.0, armed_cruise_gnss_pos_residual_boost_hold_sec_);
+    }
+    const bool residual_position_boost_active =
+      armed_cruise_gnss_pos_residual_boost_enable_ &&
+      std::isfinite(armed_cruise_gnss_pos_residual_boost_until_sec_) &&
+      now_sec <= armed_cruise_gnss_pos_residual_boost_until_sec_ &&
+      mavros_armed_ &&
+      motion_ctx.have_fresh_mavros_speed;
+    const bool velocity_residual_boost_context =
+      mavros_armed_ &&
+      motion_ctx.have_fresh_mavros_speed &&
+      motion_ctx.native_velocity_tightening_context;
+    if (armed_cruise_native_gnss_vel_residual_boost_enable_ &&
+        velocity_residual_boost_context &&
+        std::max(
+          std::isfinite(last_velocity_residual_e_mps) ? std::abs(last_velocity_residual_e_mps) : 0.0,
+          std::isfinite(last_velocity_residual_d_mps) ? std::abs(last_velocity_residual_d_mps) : 0.0) >=
+          std::max(0.0, armed_cruise_native_gnss_vel_residual_boost_threshold_mps_)) {
+      armed_cruise_native_gnss_vel_residual_boost_until_sec_ =
+        now_sec + std::max(0.0, armed_cruise_native_gnss_vel_residual_boost_hold_sec_);
+    }
+    const bool residual_velocity_boost_active =
+      armed_cruise_native_gnss_vel_residual_boost_enable_ &&
+      std::isfinite(armed_cruise_native_gnss_vel_residual_boost_until_sec_) &&
+      now_sec <= armed_cruise_native_gnss_vel_residual_boost_until_sec_ &&
+      velocity_residual_boost_context;
+
+    const auto compute_core_gnss_diff = [&](const kfcore::State & core_state,
+                                            double * diff_h_m,
+                                            double * diff_u_m) {
+      if (diff_h_m != nullptr) {
+        *diff_h_m = std::numeric_limits<double>::quiet_NaN();
+      }
+      if (diff_u_m != nullptr) {
+        *diff_u_m = std::numeric_limits<double>::quiet_NaN();
+      }
+      if (!std::isfinite(core_state.lat_deg) ||
+          !std::isfinite(core_state.lon_deg) ||
+          !std::isfinite(core_state.h_m)) {
+        return;
+      }
+
+      const double core_lat_rad = core_state.lat_deg * M_PI / 180.0;
+      const double core_lon_rad = core_state.lon_deg * M_PI / 180.0;
+      double core_x, core_y, core_z;
+      double gnss_x, gnss_y, gnss_z;
+      geo::llh_to_ecef(core_lat_rad, core_lon_rad, core_state.h_m, core_x, core_y, core_z);
+      geo::llh_to_ecef(last_gnss_lat_rad_, last_gnss_lon_rad_, last_gnss_h_m_, gnss_x, gnss_y, gnss_z);
+      const Eigen::Vector3d enu_core =
+        geo::ecef_to_enu({core_x, core_y, core_z}, origin_ecef_, origin_lat_, origin_lon_);
+      const Eigen::Vector3d enu_gnss =
+        geo::ecef_to_enu({gnss_x, gnss_y, gnss_z}, origin_ecef_, origin_lat_, origin_lon_);
+      if (diff_h_m != nullptr &&
+          std::isfinite(enu_core.x()) && std::isfinite(enu_core.y()) &&
+          std::isfinite(enu_gnss.x()) && std::isfinite(enu_gnss.y())) {
+        *diff_h_m = std::hypot(enu_core.x() - enu_gnss.x(), enu_core.y() - enu_gnss.y());
+      }
+      if (diff_u_m != nullptr &&
+          std::isfinite(enu_core.z()) && std::isfinite(enu_gnss.z())) {
+        *diff_u_m = enu_core.z() - enu_gnss.z();
+      }
+    };
+
+    double core_gnss_diff_h_m = std::numeric_limits<double>::quiet_NaN();
+    double core_gnss_diff_u_m = std::numeric_limits<double>::quiet_NaN();
+    double core_pos_std_d_m = std::numeric_limits<double>::quiet_NaN();
+    double core_vel_std_d_mps = std::numeric_limits<double>::quiet_NaN();
+    double core_accbias_std_z_mps2 = std::numeric_limits<double>::quiet_NaN();
+    const auto refresh_core_vertical_debug = [&]() {
+      const Eigen::MatrixXd core_covariance = core_->covariance();
+      if (core_covariance.rows() < 15 || core_covariance.cols() < 15) {
+        core_pos_std_d_m = std::numeric_limits<double>::quiet_NaN();
+        core_vel_std_d_mps = std::numeric_limits<double>::quiet_NaN();
+        core_accbias_std_z_mps2 = std::numeric_limits<double>::quiet_NaN();
+        return;
+      }
+      const auto diag_std = [&](int idx) {
+        const double value = core_covariance(idx, idx);
+        return (std::isfinite(value) && value >= 0.0)
+                 ? std::sqrt(value)
+                 : std::numeric_limits<double>::quiet_NaN();
+      };
+      core_pos_std_d_m = diag_std(2);
+      core_vel_std_d_mps = diag_std(5);
+      core_accbias_std_z_mps2 = diag_std(14);
+    };
+
+    const kfcore::State core_state_before_update = core_->current();
+    compute_core_gnss_diff(core_state_before_update, &core_gnss_diff_h_m, &core_gnss_diff_u_m);
+    refresh_core_vertical_debug();
+
+    if (armed_cruise_vertical_cov_reopen_enable_ &&
+        velocity_residual_boost_context &&
+        ((std::isfinite(last_position_residual_u_m) &&
+          last_position_residual_u_m >=
+            std::max(0.0, armed_cruise_vertical_cov_reopen_threshold_m_)) ||
+         (std::isfinite(core_gnss_diff_u_m) &&
+          std::abs(core_gnss_diff_u_m) >=
+            std::max(0.0, armed_cruise_vertical_cov_reopen_threshold_m_)))) {
+      armed_cruise_vertical_cov_reopen_until_sec_ =
+        now_sec + std::max(0.0, armed_cruise_vertical_cov_reopen_hold_sec_);
+    }
+    const bool vertical_cov_reopen_active =
+      armed_cruise_vertical_cov_reopen_enable_ &&
+      std::isfinite(armed_cruise_vertical_cov_reopen_until_sec_) &&
+      now_sec <= armed_cruise_vertical_cov_reopen_until_sec_ &&
+      velocity_residual_boost_context;
+    bool vertical_cov_reopen_applied = false;
+    if (vertical_cov_reopen_active) {
+      vertical_cov_reopen_applied = core_->reopenVerticalCovariance(
+        std::max(0.01, std::abs(armed_cruise_vertical_cov_reopen_pos_std_m_)),
+        std::max(0.01, std::abs(armed_cruise_vertical_cov_reopen_vel_std_mps_)),
+        std::max(1e-4, std::abs(armed_cruise_vertical_cov_reopen_accbias_std_z_mps2_)));
+      if (vertical_cov_reopen_applied) {
+        refresh_core_vertical_debug();
+      }
+    }
+    const bool post_flight_vertical_cov_reopen_context =
+      post_flight_vertical_cov_reopen_enable_ &&
+      !mavros_armed_ &&
+      have_completed_armed_flight_since_reset_;
+    const bool post_flight_vertical_cov_reopen_grace_active =
+      post_flight_vertical_cov_reopen_context &&
+      std::isfinite(last_disarmed_transition_time_sec_) &&
+      std::max(0.0, post_flight_vertical_cov_reopen_grace_sec_) > 0.0 &&
+      (now_sec - last_disarmed_transition_time_sec_) <=
+        std::max(0.0, post_flight_vertical_cov_reopen_grace_sec_);
+    if (post_flight_vertical_cov_reopen_context &&
+        (post_flight_vertical_cov_reopen_grace_active ||
+         (std::isfinite(last_position_residual_u_m) &&
+          last_position_residual_u_m >=
+            std::max(0.0, post_flight_vertical_cov_reopen_threshold_m_)) ||
+         (std::isfinite(core_gnss_diff_u_m) &&
+          std::abs(core_gnss_diff_u_m) >=
+            std::max(0.0, post_flight_vertical_cov_reopen_threshold_m_)))) {
+      post_flight_vertical_cov_reopen_until_sec_ =
+        now_sec + std::max(0.0, post_flight_vertical_cov_reopen_hold_sec_);
+    }
+    const bool post_flight_vertical_cov_reopen_active =
+      post_flight_vertical_cov_reopen_context &&
+      (post_flight_vertical_cov_reopen_grace_active ||
+       (std::isfinite(post_flight_vertical_cov_reopen_until_sec_) &&
+        now_sec <= post_flight_vertical_cov_reopen_until_sec_));
+    bool post_flight_vertical_cov_reopen_applied = false;
+    if (post_flight_vertical_cov_reopen_active) {
+      post_flight_vertical_cov_reopen_applied = core_->reopenVerticalCovariance(
+        std::max(0.01, std::abs(post_flight_vertical_cov_reopen_pos_std_m_)),
+        std::max(0.01, std::abs(post_flight_vertical_cov_reopen_vel_std_mps_)),
+        std::max(1e-4, std::abs(post_flight_vertical_cov_reopen_accbias_std_z_mps2_)));
+      if (post_flight_vertical_cov_reopen_applied) {
+        refresh_core_vertical_debug();
+      }
+    }
+    const bool any_vertical_cov_reopen_active =
+      vertical_cov_reopen_active || post_flight_vertical_cov_reopen_active;
+    const bool any_vertical_cov_reopen_applied =
+      vertical_cov_reopen_applied || post_flight_vertical_cov_reopen_applied;
 
     Eigen::Vector3d std_ned(-1,-1,-1);
     bool position_override_active = false;
@@ -2455,13 +2828,33 @@ private:
       const double position_std_floor_m = 0.01;
       const double override_std_h_m =
         std::max(position_std_floor_m, std::abs(armed_cruise_gnss_pos_std_h_m_));
+      const double override_std_u_m =
+        std::max(position_std_floor_m, std::abs(armed_cruise_gnss_pos_std_u_m_));
       std_ned.x() = std::min(std_ned.x(), override_std_h_m);
       std_ned.y() = std::min(std_ned.y(), override_std_h_m);
+      std_ned.z() = std::min(std_ned.z(), override_std_u_m);
       position_override_active = true;
     }
 
+    if (residual_position_boost_active) {
+      const double position_std_floor_m = 0.01;
+      const double override_std_h_m =
+        std::max(position_std_floor_m, std::abs(armed_cruise_gnss_pos_std_h_m_));
+      const double override_std_u_m =
+        std::max(position_std_floor_m, std::abs(armed_cruise_gnss_pos_std_u_m_));
+      std_ned.x() = std::min(std_ned.x(), override_std_h_m);
+      std_ned.y() = std::min(std_ned.y(), override_std_h_m);
+      std_ned.z() = std::min(std_ned.z(), override_std_u_m);
+      position_override_active = true;
+    }
+
+    // Pre-arm yaw lock is useful when the first GNSS reset had to fall back to yaw=0
+    // before MAVROS heading was ready. Keep it out of post-flight disarmed windows so
+    // we do not perturb the landed sentinel checks or clear the path after mission end.
     if (!reset_this_gnss &&
-        disarmed_yaw_lock_enable_ && !mavros_armed_ && core_initialized_ && have_mavros_heading_) {
+        disarmed_yaw_lock_enable_ && !mavros_armed_ &&
+        !have_completed_armed_flight_since_reset_ &&
+        core_initialized_ && have_mavros_heading_) {
       const bool interval_elapsed =
         !std::isfinite(last_disarmed_yaw_lock_time_sec_) ||
         (now_sec - last_disarmed_yaw_lock_time_sec_) >=
@@ -2521,24 +2914,32 @@ private:
       std::isfinite(native_vD);
     bool native_velocity_used = false;
     bool native_velocity_override_active = false;
+    bool residual_velocity_boost_applied = false;
     double native_velocity_std_h_mps = std::numeric_limits<double>::quiet_NaN();
     double native_velocity_std_u_mps = std::numeric_limits<double>::quiet_NaN();
     if (enable_gnss_velocity_update_ && !zupt_applied && have_native_gnss_velocity) {
-      double vel_floor_h = std::max(0.05, gnss_vel_std_floor_h_mps_);
-      double vel_floor_u = std::max(0.1, gnss_vel_std_floor_u_mps_);
+      double vel_floor_h = std::max(0.03, gnss_vel_std_floor_h_mps_);
+      double vel_floor_u = std::max(0.08, gnss_vel_std_floor_u_mps_);
       native_velocity_override_active =
         armed_cruise_native_gnss_vel_override_enable_ &&
         motion_ctx.native_velocity_tightening_context;
       if (native_velocity_override_active) {
-        vel_floor_h = std::max(0.05, std::abs(armed_cruise_native_gnss_vel_std_h_mps_));
-        vel_floor_u = std::max(0.10, std::abs(armed_cruise_native_gnss_vel_std_u_mps_));
+        vel_floor_h = std::max(0.03, std::abs(armed_cruise_native_gnss_vel_std_h_mps_));
+        vel_floor_u = std::max(0.08, std::abs(armed_cruise_native_gnss_vel_std_u_mps_));
+      }
+      if (residual_velocity_boost_active) {
+        vel_floor_h =
+          std::max(0.03, std::abs(armed_cruise_native_gnss_vel_residual_boost_std_h_mps_));
+        vel_floor_u =
+          std::max(0.08, std::abs(armed_cruise_native_gnss_vel_residual_boost_std_u_mps_));
+        residual_velocity_boost_applied = true;
       }
       const double native_std =
         (std::isfinite(native_speed_std_mps) && native_speed_std_mps > 0.0)
           ? native_speed_std_mps * std::max(0.0, native_gnss_speed_std_scale_)
           : std::numeric_limits<double>::quiet_NaN();
       Eigen::Vector3d vel_std;
-      if (native_velocity_override_active) {
+      if (native_velocity_override_active || residual_velocity_boost_applied) {
         vel_std = Eigen::Vector3d(vel_floor_h, vel_floor_h, vel_floor_u);
       } else {
         vel_std = Eigen::Vector3d(
@@ -2586,12 +2987,19 @@ private:
         }
       }
     }
-    const kfcore::State gnss_state = core_->current();
     pending_gnss_debug_context_.valid = true;
     pending_gnss_debug_context_.native_velocity_valid = have_native_gnss_velocity;
     pending_gnss_debug_context_.native_velocity_used = native_velocity_used;
     pending_gnss_debug_context_.native_velocity_override_active = native_velocity_override_active;
+    pending_gnss_debug_context_.velocity_residual_boost_active = residual_velocity_boost_applied;
     pending_gnss_debug_context_.position_override_active = position_override_active;
+    pending_gnss_debug_context_.position_residual_boost_active = residual_position_boost_active;
+    pending_gnss_debug_context_.vertical_cov_reopen_active = any_vertical_cov_reopen_active;
+    pending_gnss_debug_context_.vertical_cov_reopen_applied = any_vertical_cov_reopen_applied;
+    pending_gnss_debug_context_.post_flight_vertical_cov_reopen_active =
+      post_flight_vertical_cov_reopen_active;
+    pending_gnss_debug_context_.post_flight_vertical_cov_reopen_applied =
+      post_flight_vertical_cov_reopen_applied;
     pending_gnss_debug_context_.armed = mavros_armed_;
     pending_gnss_debug_context_.have_fresh_speed = motion_ctx.have_fresh_mavros_speed;
     pending_gnss_debug_context_.turning_now = motion_ctx.turning_now;
@@ -2599,12 +3007,33 @@ private:
     pending_gnss_debug_context_.armed_cruise_context = motion_ctx.armed_cruise_force_relock_context;
     pending_gnss_debug_context_.native_velocity_tightening_context =
       motion_ctx.native_velocity_tightening_context;
+    pending_gnss_debug_context_.medium_gap_active = last_medium_imu_gap_active_;
+    pending_gnss_debug_context_.medium_gap_segmented = last_medium_imu_gap_segmented_;
+    pending_gnss_debug_context_.medium_gap_conservative_single_step =
+      last_medium_imu_gap_conservative_single_step_;
+    pending_gnss_debug_context_.last_position_residual_h_m = last_position_residual_h_m;
+    pending_gnss_debug_context_.last_position_residual_u_m = last_position_residual_u_m;
+    pending_gnss_debug_context_.last_velocity_residual_h_mps = last_velocity_residual_h_mps;
+    pending_gnss_debug_context_.last_velocity_residual_e_mps = last_velocity_residual_e_mps;
+    pending_gnss_debug_context_.last_velocity_residual_d_mps = last_velocity_residual_d_mps;
+    pending_gnss_debug_context_.core_gnss_diff_h_m = core_gnss_diff_h_m;
+    pending_gnss_debug_context_.core_gnss_diff_u_m = core_gnss_diff_u_m;
+    pending_gnss_debug_context_.core_pos_std_d_m = core_pos_std_d_m;
+    pending_gnss_debug_context_.core_vel_std_d_mps = core_vel_std_d_mps;
+    pending_gnss_debug_context_.core_accbias_std_z_mps2 = core_accbias_std_z_mps2;
     pending_gnss_debug_context_.ros_time_sec = now_sec;
     pending_gnss_debug_context_.update_time_sec = t;
     pending_gnss_debug_context_.horizontal_speed_mps = last_mavros_horizontal_speed_mps_;
     pending_gnss_debug_context_.vertical_speed_mps = last_mavros_vertical_speed_mps_;
     pending_gnss_debug_context_.gyro_deg_s = last_imu_gyro_norm_deg_s_;
     pending_gnss_debug_context_.source_yaw_rate_deg_s = last_mavros_heading_rate_deg_s_;
+    pending_gnss_debug_context_.latest_imu_raw_dt_sec = last_processed_imu_raw_dt_sec_;
+    pending_gnss_debug_context_.latest_imu_effective_dt_sec =
+      last_processed_imu_effective_dt_sec_;
+    pending_gnss_debug_context_.medium_gap_dropped_dt_sec =
+      last_medium_imu_gap_dropped_dt_sec_;
+    pending_gnss_debug_context_.medium_gap_segmented_steps =
+      last_medium_imu_gap_segmented_steps_;
     pending_gnss_debug_context_.native_velocity_std_h_mps = native_velocity_std_h_mps;
     pending_gnss_debug_context_.native_velocity_std_u_mps = native_velocity_std_u_mps;
     pending_gnss_debug_context_.native_velocity_vN_mps =
@@ -2613,9 +3042,9 @@ private:
       have_native_gnss_velocity ? native_vE : std::numeric_limits<double>::quiet_NaN();
     pending_gnss_debug_context_.native_velocity_vD_mps =
       have_native_gnss_velocity ? native_vD : std::numeric_limits<double>::quiet_NaN();
-    pending_gnss_debug_context_.core_velocity_vN_mps = gnss_state.vN;
-    pending_gnss_debug_context_.core_velocity_vE_mps = gnss_state.vE;
-    pending_gnss_debug_context_.core_velocity_vD_mps = gnss_state.vD;
+    pending_gnss_debug_context_.core_velocity_vN_mps = core_state_before_update.vN;
+    pending_gnss_debug_context_.core_velocity_vE_mps = core_state_before_update.vE;
+    pending_gnss_debug_context_.core_velocity_vD_mps = core_state_before_update.vD;
     prev_gnss_vel_lat_rad_ = latitude  * M_PI/180.0;
     prev_gnss_vel_lon_rad_ = longitude * M_PI/180.0;
     prev_gnss_vel_h_       = altitude;
@@ -3070,10 +3499,15 @@ private:
     bool heading_horizontal_ok{false};
     bool heading_vertical_ok{false};
     bool armed_motion_ok{false};
+    bool vertical_dominant_low_horizontal_motion{false};
+    bool turn_track_motion_ok{false};
     bool turning_now{false};
     bool recent_turning{false};
     bool post_turn_hold_active{false};
     bool post_turn_context{false};
+    bool post_turn_track_motion_ok{false};
+    bool post_turn_underreaction_motion_ok{false};
+    bool post_turn_cruise_motion_ok{false};
     bool armed_cruise_force_relock_context{false};
     bool native_velocity_tightening_context{false};
     bool armed_cruise_force_relock_gyro_ok{false};
@@ -3086,19 +3520,42 @@ private:
     bool native_velocity_valid{false};
     bool native_velocity_used{false};
     bool native_velocity_override_active{false};
+    bool velocity_residual_boost_active{false};
     bool position_override_active{false};
+    bool position_residual_boost_active{false};
+    bool vertical_cov_reopen_active{false};
+    bool vertical_cov_reopen_applied{false};
+    bool post_flight_vertical_cov_reopen_active{false};
+    bool post_flight_vertical_cov_reopen_applied{false};
     bool armed{false};
     bool have_fresh_speed{false};
     bool turning_now{false};
     bool post_turn_context{false};
     bool armed_cruise_context{false};
     bool native_velocity_tightening_context{false};
+    bool medium_gap_active{false};
+    bool medium_gap_segmented{false};
+    bool medium_gap_conservative_single_step{false};
     double ros_time_sec{std::numeric_limits<double>::quiet_NaN()};
     double update_time_sec{std::numeric_limits<double>::quiet_NaN()};
+    double last_position_residual_h_m{std::numeric_limits<double>::quiet_NaN()};
+    double last_position_residual_u_m{std::numeric_limits<double>::quiet_NaN()};
+    double last_velocity_residual_h_mps{std::numeric_limits<double>::quiet_NaN()};
+    double last_velocity_residual_e_mps{std::numeric_limits<double>::quiet_NaN()};
+    double last_velocity_residual_d_mps{std::numeric_limits<double>::quiet_NaN()};
+    double core_gnss_diff_h_m{std::numeric_limits<double>::quiet_NaN()};
+    double core_gnss_diff_u_m{std::numeric_limits<double>::quiet_NaN()};
+    double core_pos_std_d_m{std::numeric_limits<double>::quiet_NaN()};
+    double core_vel_std_d_mps{std::numeric_limits<double>::quiet_NaN()};
+    double core_accbias_std_z_mps2{std::numeric_limits<double>::quiet_NaN()};
     double horizontal_speed_mps{std::numeric_limits<double>::quiet_NaN()};
     double vertical_speed_mps{std::numeric_limits<double>::quiet_NaN()};
     double gyro_deg_s{std::numeric_limits<double>::quiet_NaN()};
     double source_yaw_rate_deg_s{std::numeric_limits<double>::quiet_NaN()};
+    double latest_imu_raw_dt_sec{std::numeric_limits<double>::quiet_NaN()};
+    double latest_imu_effective_dt_sec{std::numeric_limits<double>::quiet_NaN()};
+    double medium_gap_dropped_dt_sec{std::numeric_limits<double>::quiet_NaN()};
+    int medium_gap_segmented_steps{1};
     double native_velocity_std_h_mps{std::numeric_limits<double>::quiet_NaN()};
     double native_velocity_std_u_mps{std::numeric_limits<double>::quiet_NaN()};
     double native_velocity_vN_mps{std::numeric_limits<double>::quiet_NaN()};
@@ -3134,6 +3591,21 @@ private:
       std::isfinite(imu_gap_turn_rate_gate_deg_s_) &&
       imu_gap_turn_rate_gate_deg_s_ > 0.0 &&
       last_imu_gyro_norm_deg_s_ >= imu_gap_turn_rate_gate_deg_s_;
+    // manual36 showed that aggressive turn_track updates during near-hover,
+    // vertically dominated turns can seed the large post-turn tail. Keep the
+    // stronger turn tracking for flatter or high-horizontal turns, but fall
+    // back to the base heading update when vertical motion dominates.
+    const bool turn_track_low_horizontal_motion =
+      ctx.have_fresh_mavros_speed &&
+      last_mavros_horizontal_speed_mps_ < std::max(0.0, heading_update_low_speed_thresh_mps_);
+    const bool turn_track_vertical_dominant_motion =
+      ctx.have_fresh_mavros_speed &&
+      last_mavros_vertical_speed_mps_ > last_mavros_horizontal_speed_mps_;
+    ctx.vertical_dominant_low_horizontal_motion =
+      turn_track_low_horizontal_motion && turn_track_vertical_dominant_motion;
+    ctx.turn_track_motion_ok =
+      ctx.turning_now &&
+      !ctx.vertical_dominant_low_horizontal_motion;
     if (update_turning_history && ctx.turning_now) {
       last_turning_heading_time_sec_ = now_sec;
     }
@@ -3152,6 +3624,42 @@ private:
       heading_post_turn_reacquire_hold_sec_ > 0.0 &&
       now_sec <= post_turn_hold_end_time_sec_;
     ctx.post_turn_context = ctx.recent_turning || ctx.post_turn_hold_active;
+
+    ctx.armed_cruise_force_relock_gyro_ok =
+      !std::isfinite(last_imu_gyro_norm_deg_s_) ||
+      heading_armed_cruise_force_relock_max_gyro_deg_s_ <= 0.0 ||
+      last_imu_gyro_norm_deg_s_ <= heading_armed_cruise_force_relock_max_gyro_deg_s_;
+    ctx.armed_cruise_force_relock_source_rate_ok =
+      !std::isfinite(last_mavros_heading_rate_deg_s_) ||
+      heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s_ <= 0.0 ||
+      std::abs(last_mavros_heading_rate_deg_s_) <=
+        heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s_;
+    // manual33 showed that reusing the strict underreaction gyro/source-rate
+    // gate for all post-turn tracking removes the low-speed/high-vertical
+    // tail, but also blocks legitimate higher-rate post-turn convergence.
+    ctx.post_turn_track_motion_ok =
+      ctx.post_turn_context &&
+      ctx.have_fresh_mavros_speed &&
+      last_mavros_horizontal_speed_mps_ >= std::max(0.0, heading_update_low_speed_thresh_mps_) &&
+      (heading_armed_cruise_force_relock_max_vertical_speed_mps_ <= 0.0 ||
+       last_mavros_vertical_speed_mps_ <=
+         heading_armed_cruise_force_relock_max_vertical_speed_mps_);
+    ctx.post_turn_underreaction_motion_ok =
+      ctx.recent_turning &&
+      ctx.post_turn_track_motion_ok &&
+      ctx.armed_cruise_force_relock_gyro_ok &&
+      ctx.armed_cruise_force_relock_source_rate_ok;
+    ctx.post_turn_cruise_motion_ok =
+      ctx.recent_turning &&
+      ctx.post_turn_track_motion_ok &&
+      (heading_armed_cruise_force_relock_min_horizontal_speed_mps_ <= 0.0 ||
+       last_mavros_horizontal_speed_mps_ >=
+         heading_armed_cruise_force_relock_min_horizontal_speed_mps_) &&
+      (heading_armed_cruise_force_relock_max_vertical_speed_mps_ <= 0.0 ||
+       last_mavros_vertical_speed_mps_ <=
+         heading_armed_cruise_force_relock_max_vertical_speed_mps_) &&
+      ctx.armed_cruise_force_relock_gyro_ok &&
+      ctx.armed_cruise_force_relock_source_rate_ok;
 
     ctx.armed_cruise_force_relock_context =
       heading_armed_cruise_force_relock_enable_ &&
@@ -3175,16 +3683,6 @@ private:
       (heading_armed_cruise_force_relock_max_vertical_speed_mps_ <= 0.0 ||
        last_mavros_vertical_speed_mps_ <=
          heading_armed_cruise_force_relock_max_vertical_speed_mps_);
-    ctx.armed_cruise_force_relock_gyro_ok =
-      !std::isfinite(last_imu_gyro_norm_deg_s_) ||
-      heading_armed_cruise_force_relock_max_gyro_deg_s_ <= 0.0 ||
-      last_imu_gyro_norm_deg_s_ <= heading_armed_cruise_force_relock_max_gyro_deg_s_;
-    ctx.armed_cruise_force_relock_source_rate_ok =
-      !std::isfinite(last_mavros_heading_rate_deg_s_) ||
-      heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s_ <= 0.0 ||
-      std::abs(last_mavros_heading_rate_deg_s_) <=
-        heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s_;
-
     return ctx;
   }
 
@@ -3239,10 +3737,19 @@ private:
       << "gnss_velocity_residual_n_mps,gnss_velocity_residual_e_mps,gnss_velocity_residual_d_mps,"
       << "gnss_velocity_std_n_mps,gnss_velocity_std_e_mps,gnss_velocity_std_d_mps,"
       << "pending_debug_matched,pending_native_velocity_valid,pending_native_velocity_used,"
-      << "native_velocity_override_active,position_override_active,mavros_armed,have_fresh_speed,turning_now,"
+      << "native_velocity_override_active,velocity_residual_boost_active,"
+      << "position_override_active,position_residual_boost_active,"
+      << "vertical_cov_reopen_active,vertical_cov_reopen_applied,"
+      << "post_flight_vertical_cov_reopen_active,post_flight_vertical_cov_reopen_applied,"
+      << "last_position_residual_h_m,last_position_residual_u_m,last_velocity_residual_h_mps,last_velocity_residual_e_mps,last_velocity_residual_d_mps,"
+      << "core_gnss_diff_h_m,core_gnss_diff_u_m,core_pos_std_d_m,core_vel_std_d_mps,core_accbias_std_z_mps2,"
+      << "mavros_armed,have_fresh_speed,turning_now,"
       << "post_turn_context,armed_cruise_context,native_velocity_tightening_context,"
+      << "medium_gap_active,medium_gap_segmented,medium_gap_conservative_single_step,"
       << "horizontal_speed_mps,vertical_speed_mps,"
-      << "gyro_deg_s,source_yaw_rate_deg_s,native_velocity_std_h_mps,native_velocity_std_u_mps,"
+      << "gyro_deg_s,source_yaw_rate_deg_s,"
+      << "latest_imu_raw_dt_sec,latest_imu_effective_dt_sec,medium_gap_dropped_dt_sec,medium_gap_segmented_steps,"
+      << "native_velocity_std_h_mps,native_velocity_std_u_mps,"
       << "native_velocity_vN_mps,native_velocity_vE_mps,native_velocity_vD_mps,"
       << "core_velocity_vN_mps,core_velocity_vE_mps,core_velocity_vD_mps\n";
     gnss_update_debug_csv_.flush();
@@ -3295,17 +3802,40 @@ private:
       << ((pending_debug_matched && pending_gnss_debug_context_.native_velocity_valid) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.native_velocity_used) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.native_velocity_override_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.velocity_residual_boost_active) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.position_override_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.position_residual_boost_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.vertical_cov_reopen_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.vertical_cov_reopen_applied) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.post_flight_vertical_cov_reopen_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.post_flight_vertical_cov_reopen_applied) ? 1 : 0) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.last_position_residual_h_m : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.last_position_residual_u_m : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.last_velocity_residual_h_mps : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.last_velocity_residual_e_mps : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.last_velocity_residual_d_mps : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.core_gnss_diff_h_m : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.core_gnss_diff_u_m : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.core_pos_std_d_m : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.core_vel_std_d_mps : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.core_accbias_std_z_mps2 : std::numeric_limits<double>::quiet_NaN()) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.armed) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.have_fresh_speed) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.turning_now) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.post_turn_context) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.armed_cruise_context) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.native_velocity_tightening_context) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.medium_gap_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.medium_gap_segmented) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.medium_gap_conservative_single_step) ? 1 : 0) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.horizontal_speed_mps : std::numeric_limits<double>::quiet_NaN()) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.vertical_speed_mps : std::numeric_limits<double>::quiet_NaN()) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.gyro_deg_s : std::numeric_limits<double>::quiet_NaN()) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.source_yaw_rate_deg_s : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.latest_imu_raw_dt_sec : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.latest_imu_effective_dt_sec : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.medium_gap_dropped_dt_sec : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.medium_gap_segmented_steps : 0) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.native_velocity_std_h_mps : std::numeric_limits<double>::quiet_NaN()) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.native_velocity_std_u_mps : std::numeric_limits<double>::quiet_NaN()) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.native_velocity_vN_mps : std::numeric_limits<double>::quiet_NaN()) << ','
@@ -3467,6 +3997,9 @@ private:
   bool path_require_armed_{false};
   bool clear_path_on_arm_transition_{false};
   bool mavros_armed_{false};
+  bool have_completed_armed_flight_since_reset_{false};
+  double last_armed_transition_time_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double last_disarmed_transition_time_sec_{std::numeric_limits<double>::quiet_NaN()};
 
   // MAVROS 航向 (来自 EKF2 磁力计融合)
   bool have_mavros_heading_{false};
@@ -3522,9 +4055,35 @@ private:
   bool armed_cruise_native_gnss_vel_override_enable_{true};
   bool armed_cruise_gnss_pos_override_enable_{false};
   double armed_cruise_gnss_pos_std_h_m_{0.06};
+  double armed_cruise_gnss_pos_std_u_m_{0.08};
+  bool armed_cruise_gnss_pos_residual_boost_enable_{false};
+  double armed_cruise_gnss_pos_residual_boost_threshold_m_{0.12};
+  double armed_cruise_gnss_pos_residual_boost_hold_sec_{20.0};
   double armed_cruise_native_gnss_vel_min_horizontal_speed_mps_{0.5};
   double armed_cruise_native_gnss_vel_std_h_mps_{0.05};
   double armed_cruise_native_gnss_vel_std_u_mps_{0.10};
+  bool armed_cruise_native_gnss_vel_residual_boost_enable_{false};
+  double armed_cruise_native_gnss_vel_residual_boost_threshold_mps_{0.10};
+  double armed_cruise_native_gnss_vel_residual_boost_hold_sec_{8.0};
+  double armed_cruise_native_gnss_vel_residual_boost_std_h_mps_{0.03};
+  double armed_cruise_native_gnss_vel_residual_boost_std_u_mps_{0.08};
+  bool armed_cruise_vertical_cov_reopen_enable_{false};
+  double armed_cruise_vertical_cov_reopen_threshold_m_{0.15};
+  double armed_cruise_vertical_cov_reopen_hold_sec_{8.0};
+  double armed_cruise_vertical_cov_reopen_pos_std_m_{0.15};
+  double armed_cruise_vertical_cov_reopen_vel_std_mps_{0.10};
+  double armed_cruise_vertical_cov_reopen_accbias_std_z_mps2_{0.05};
+  bool post_flight_vertical_cov_reopen_enable_{true};
+  double post_flight_vertical_cov_reopen_threshold_m_{0.12};
+  double post_flight_vertical_cov_reopen_hold_sec_{20.0};
+  double post_flight_vertical_cov_reopen_grace_sec_{30.0};
+  double post_flight_vertical_cov_reopen_pos_std_m_{0.25};
+  double post_flight_vertical_cov_reopen_vel_std_mps_{0.10};
+  double post_flight_vertical_cov_reopen_accbias_std_z_mps2_{0.05};
+  double armed_cruise_gnss_pos_residual_boost_until_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double armed_cruise_native_gnss_vel_residual_boost_until_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double armed_cruise_vertical_cov_reopen_until_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double post_flight_vertical_cov_reopen_until_sec_{std::numeric_limits<double>::quiet_NaN()};
   std::string gnss_update_debug_csv_path_;
   bool use_online_reset_covariance_{true};
   double reset_pos_std_m_{5.0};
@@ -3546,6 +4105,7 @@ private:
   double heading_post_turn_reacquire_window_sec_{2.0};
   double heading_post_turn_reacquire_max_residual_deg_{45.0};
   double heading_post_turn_reacquire_std_deg_{2.0};
+  double heading_post_turn_cruise_track_std_deg_{2.0};
   double heading_post_turn_reacquire_hold_sec_{4.0};
   double heading_post_turn_reacquire_max_rate_hz_{5.0};
   bool heading_post_turn_force_relock_enable_{true};
@@ -3567,6 +4127,7 @@ private:
   double heading_armed_cruise_force_relock_max_rate_hz_{1.0};
   bool heading_underreaction_force_relock_enable_{true};
   double heading_underreaction_force_relock_min_residual_deg_{1.5};
+  double heading_post_turn_soft_underreaction_min_residual_deg_{1.5};
   double heading_underreaction_force_relock_min_remaining_ratio_{0.85};
   double heading_underreaction_force_relock_yaw_std_deg_{2.0};
   double heading_underreaction_force_relock_max_rate_hz_{2.0};
@@ -3647,6 +4208,13 @@ private:
   double last_disarmed_yaw_lock_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_vertical_or_accel_trigger_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_imu_gyro_norm_deg_s_{std::numeric_limits<double>::quiet_NaN()};
+  double last_processed_imu_raw_dt_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double last_processed_imu_effective_dt_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double last_medium_imu_gap_dropped_dt_sec_{0.0};
+  bool last_medium_imu_gap_active_{false};
+  bool last_medium_imu_gap_segmented_{false};
+  bool last_medium_imu_gap_conservative_single_step_{false};
+  int last_medium_imu_gap_segmented_steps_{1};
 
 
   // ---- core ----

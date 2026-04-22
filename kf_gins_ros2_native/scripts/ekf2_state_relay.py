@@ -38,6 +38,7 @@ class EKF2StateRelay(Node):
             'velocity_topic', '/mavros/local_position/velocity_local').value
         self.output_topic = self.declare_parameter('output_topic', '/ekf2/pose').value
         self.output_odom_topic = self.declare_parameter('output_odom_topic', self.output_topic + '_odom').value
+        self.publish_pose = bool(self.declare_parameter('publish_pose', True).value)
         self.use_input_stamp = self.declare_parameter('use_input_stamp', True).value
         self.use_covariance = self.declare_parameter('use_covariance', False).value
         self.frame_id = self.declare_parameter('frame_id', 'map').value
@@ -53,11 +54,13 @@ class EKF2StateRelay(Node):
             depth=10
         )
         
-        self.pose_pub = self.create_publisher(
-            PoseStamped, 
-            self.output_topic,
-            qos
-        )
+        self.pose_pub = None
+        if self.publish_pose:
+            self.pose_pub = self.create_publisher(
+                PoseStamped, 
+                self.output_topic,
+                qos
+            )
         
         self.odom_pub = self.create_publisher(
             Odometry,
@@ -115,7 +118,8 @@ class EKF2StateRelay(Node):
             f"  输入模式: {self.input_mode}\n"
             f"  输入: {self.input_topic if self.input_mode == 'mavros_pose' else self.vehicle_odometry_topic}\n"
             f"  速度: {self.velocity_topic if self.input_mode == 'mavros_pose' else 'embedded in vehicle_odometry'}\n"
-            f"  输出: {self.output_topic}"
+            f"  输出 pose: {self.output_topic if self.publish_pose else '(disabled)'}\n"
+            f"  输出 odom: {self.output_odom_topic}"
         )
 
     def velocity_callback(self, msg: TwistStamped):
@@ -142,7 +146,8 @@ class EKF2StateRelay(Node):
             pose_out.header.frame_id = self.frame_id
             pose_out.pose = msg.pose
             
-            self.pose_pub.publish(pose_out)
+            if self.pose_pub is not None:
+                self.pose_pub.publish(pose_out)
             
             # 2. 生成 Odometry（优先使用原生速度）
             current_time_sec = self.msg_to_sec(stamp)
@@ -209,7 +214,8 @@ class EKF2StateRelay(Node):
             pose_out.pose.orientation.z = float(quat_enu[2])
             pose_out.pose.orientation.w = float(quat_enu[3])
 
-            self.pose_pub.publish(pose_out)
+            if self.pose_pub is not None:
+                self.pose_pub.publish(pose_out)
 
             odom = Odometry()
             odom.header = Header()

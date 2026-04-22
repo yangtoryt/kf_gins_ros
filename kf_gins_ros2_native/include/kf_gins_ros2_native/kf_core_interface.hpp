@@ -44,7 +44,10 @@ public:
   virtual bool forceYaw(double t_sec, double yaw_deg, double yaw_std_deg) = 0;
   virtual bool forceRollPitch(double t_sec, double roll_deg, double pitch_deg,
                               double roll_pitch_std_deg) = 0;
+  virtual bool reopenVerticalCovariance(double pos_std_m, double vel_std_mps,
+                                        double accbias_std_z_mps2) = 0;
   virtual State current() const = 0;
+  virtual Eigen::MatrixXd covariance() const = 0;
   virtual ObservationDebug lastObservationDebug() const = 0;
 };
 std::unique_ptr<KFCore> create_kf_core();

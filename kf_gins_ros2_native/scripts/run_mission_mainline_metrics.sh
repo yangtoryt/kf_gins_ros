@@ -14,18 +14,24 @@ GAP_PROBE_START_DELAY="5"
 GAP_PROBE_WINDOW="25"
 EXIT_AFTER_GAP_PROBE=1
 MISSION_TIMEOUT_SEC="320"
+POST_MISSION_SETTLE_SEC="0"
 STATUS_WINDOW_START_SEC="145"
 STATUS_WINDOW_END_SEC="151"
 GPS_TOPIC="/gps/fix"
 GPS_VS_POSE_TOPIC="/ekf2/pose_odom"
 GPS_VS_SECOND_POSE_TOPIC="/kf_gins/odom_raw"
+GPS_PROBE_GLOBAL_ALIGNMENT_HOLDOFF_SEC="0.0"
+GPS_PROBE_GLOBAL_ALIGNMENT_MIN_PAIRS="1"
+GPS_PROBE_LOCAL_REANCHOR_WINDOW_SEC=""
 SMOKE_PRINT_PERIOD_SEC="10"
 ROS_DOMAIN_ID_VALUE="${ROS_DOMAIN_ID:-0}"
 RAW_GPS_LITE=0
 ENABLE_GNSS_UPDATE_DEBUG_CSV=1
+COMPARISON_RUNTIME_PROFILE="minimal"
 GPS_VS_POSE_TOPIC_SET=0
 GPS_VS_SECOND_POSE_TOPIC_SET=0
 GNSS_DEBUG_CSV_SET=0
+GPS_PROBE_LOCAL_REANCHOR_WINDOW_SET=0
 declare -a EXTRA_LAUNCH_ARGS=()
 declare -a EXTRA_SMOKE_ARGS=()
 
@@ -39,16 +45,21 @@ options:
   --raw-gps-lite
   --enable-gnss-debug-csv
   --disable-gnss-debug-csv
+  --comparison-runtime-profile <minimal|full>
   --gap-probe-profile <name>
   --gap-probe-start-after-reached <seq>
   --gap-probe-start-delay <sec>
   --gap-probe-window <sec>
   --mission-timeout <sec>
+  --post-mission-settle <sec>
   --status-window-start <sec>
   --status-window-end <sec>
   --gps-topic <topic>
   --gps-vs-pose-topic <topic|none>
   --gps-vs-second-pose-topic <topic|none>
+  --gps-probe-global-alignment-holdoff <sec>
+  --gps-probe-global-alignment-min-pairs <count>
+  --gps-probe-local-reanchor-window <sec>
   --launch-arg <name:=value>
   --smoke-arg <arg>
 EOF
@@ -78,6 +89,10 @@ while (($# > 0)); do
       GNSS_DEBUG_CSV_SET=1
       shift
       ;;
+    --comparison-runtime-profile)
+      COMPARISON_RUNTIME_PROFILE="$2"
+      shift 2
+      ;;
     --gap-probe-profile)
       GAP_PROBE_PROFILE="$2"
       shift 2
@@ -96,6 +111,10 @@ while (($# > 0)); do
       ;;
     --mission-timeout)
       MISSION_TIMEOUT_SEC="$2"
+      shift 2
+      ;;
+    --post-mission-settle)
+      POST_MISSION_SETTLE_SEC="$2"
       shift 2
       ;;
     --status-window-start)
@@ -128,6 +147,19 @@ while (($# > 0)); do
       GPS_VS_SECOND_POSE_TOPIC_SET=1
       shift 2
       ;;
+    --gps-probe-global-alignment-holdoff)
+      GPS_PROBE_GLOBAL_ALIGNMENT_HOLDOFF_SEC="$2"
+      shift 2
+      ;;
+    --gps-probe-global-alignment-min-pairs)
+      GPS_PROBE_GLOBAL_ALIGNMENT_MIN_PAIRS="$2"
+      shift 2
+      ;;
+    --gps-probe-local-reanchor-window)
+      GPS_PROBE_LOCAL_REANCHOR_WINDOW_SEC="$2"
+      GPS_PROBE_LOCAL_REANCHOR_WINDOW_SET=1
+      shift 2
+      ;;
     --launch-arg)
       EXTRA_LAUNCH_ARGS+=("$2")
       shift 2
@@ -153,6 +185,18 @@ while (($# > 0)); do
   esac
 done
 
+if [[ "${GPS_PROBE_LOCAL_REANCHOR_WINDOW_SET}" == "0" ]]; then
+  GPS_PROBE_LOCAL_REANCHOR_WINDOW_SEC="$(
+    python3 - "${STATUS_WINDOW_START_SEC}" "${STATUS_WINDOW_END_SEC}" <<'PY'
+import sys
+start = float(sys.argv[1])
+end = float(sys.argv[2])
+width = end - start
+print(f"{width:.6f}" if width > 0.0 else "25.0")
+PY
+  )"
+fi
+
 if [[ "${RAW_GPS_LITE}" == "1" ]]; then
   if [[ "${GPS_VS_POSE_TOPIC_SET}" == "0" ]]; then
     GPS_VS_POSE_TOPIC=""
@@ -171,9 +215,57 @@ if [[ "${RAW_GPS_LITE}" == "1" ]]; then
     "enable_ekf2_path:=false"
     "enable_iekf_path:=false"
     "enable_gt_path:=false"
-    "enable_ekf2_relay:=false"
     "enable_iekf_aligned_path:=false"
   )
+  if [[ -z "${GPS_VS_POSE_TOPIC}" ]]; then
+    EXTRA_LAUNCH_ARGS+=("enable_ekf2_relay:=false")
+  fi
+fi
+
+launch_arg_is_set() {
+  local name="$1"
+  local item=""
+  for item in "${EXTRA_LAUNCH_ARGS[@]}"; do
+    if [[ "${item%%:=*}" == "${name}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+append_default_launch_arg() {
+  local item="$1"
+  local name="${item%%:=*}"
+  if ! launch_arg_is_set "${name}"; then
+    EXTRA_LAUNCH_ARGS+=("${item}")
+  fi
+}
+
+case "${COMPARISON_RUNTIME_PROFILE}" in
+  minimal|full)
+    ;;
+  *)
+    echo "unsupported --comparison-runtime-profile=${COMPARISON_RUNTIME_PROFILE} (expected: minimal|full)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "${RAW_GPS_LITE}" != "1" && "${COMPARISON_RUNTIME_PROFILE}" == "minimal" ]]; then
+  # Automated regression does not consume PlotJuggler/RViz helper topics; keep the
+  # compare CSV and GPS probes, but trim high-fanout live outputs to protect SITL continuity.
+  append_default_launch_arg "publish_ekf2_state:=false"
+  append_default_launch_arg "publish_iekf_state:=false"
+  append_default_launch_arg "publish_aligned_iekf_state:=false"
+  append_default_launch_arg "ekf2_relay_publish_pose:=false"
+  append_default_launch_arg "comparison_subscribe_ekf2_pose:=false"
+  append_default_launch_arg "enable_ekf2_path:=false"
+  append_default_launch_arg "enable_iekf_path:=false"
+  append_default_launch_arg "enable_gt_path:=false"
+  append_default_launch_arg "enable_iekf_aligned_path:=false"
+  append_default_launch_arg "comparison_publish_live_metrics:=false"
+  append_default_launch_arg "comparison_publish_named_metrics:=false"
+  append_default_launch_arg "comparison_metrics_publish_rate:=20"
+  append_default_launch_arg "comparison_metrics_log_period_sec:=15.0"
 fi
 
 if [[ -z "${RUN_DIR}" ]]; then
@@ -326,6 +418,16 @@ def finite_last(rows, key):
             return value
     return float("nan")
 
+def metric_stats(rows, key):
+    vals = [parse_float(row, key) for row in rows]
+    vals = [v for v in vals if math.isfinite(v)]
+    return {
+        "max": finite_max(vals),
+        "last": vals[-1] if vals else float("nan"),
+        "mean": finite_mean(vals),
+        "std": finite_std(vals),
+    }
+
 def rebased_xy_stats(rows):
     if not rows:
         return {
@@ -389,13 +491,15 @@ effective_window_end = window_end
 window_mode = "requested"
 
 requested_compare_window, compare_time_key = select_window(compare_rows, window_start, window_end)
-if not requested_compare_window:
-    fallback_end = float("nan")
-    for candidate_rows in (compare_rows, gnss_rows, gps_second_rows, gps_rows):
-        candidate_end, _ = max_time(candidate_rows)
-        if math.isfinite(candidate_end):
-            fallback_end = candidate_end
-            break
+requested_gnss_window, _ = select_window(gnss_rows, window_start, window_end)
+requested_gps_window, _ = select_window(gps_rows, window_start, window_end)
+requested_gps_second_window, _ = select_window(gps_second_rows, window_start, window_end)
+if not any((requested_compare_window, requested_gnss_window, requested_gps_window, requested_gps_second_window)):
+    fallback_end = finite_max(
+        candidate_end
+        for candidate_rows in (compare_rows, gnss_rows, gps_second_rows, gps_rows)
+        for candidate_end, _ in [max_time(candidate_rows)]
+    )
     if math.isfinite(fallback_end):
         effective_window_end = fallback_end
         effective_window_start = fallback_end - requested_width_sec
@@ -407,6 +511,8 @@ gps_window, gps_time_key = select_window(gps_rows, effective_window_start, effec
 gps_second_window, gps_second_time_key = select_window(gps_second_rows, effective_window_start, effective_window_end)
 gps_window_rebased = rebased_xy_stats(gps_window)
 gps_second_window_rebased = rebased_xy_stats(gps_second_window)
+gps_window_local = metric_stats(gps_window, "local_xy_error_m")
+gps_second_window_local = metric_stats(gps_second_window, "local_xy_error_m")
 
 rawdiff_values = []
 for row in compare_rows:
@@ -494,6 +600,10 @@ out = {
     "gps_vs_pose_window_rebased_last_xy_m": gps_window_rebased["last"],
     "gps_vs_pose_window_rebased_mean_xy_m": gps_window_rebased["mean"],
     "gps_vs_pose_window_rebased_std_xy_m": gps_window_rebased["std"],
+    "gps_vs_pose_window_local_max_xy_m": gps_window_local["max"],
+    "gps_vs_pose_window_local_last_xy_m": gps_window_local["last"],
+    "gps_vs_pose_window_local_mean_xy_m": gps_window_local["mean"],
+    "gps_vs_pose_window_local_std_xy_m": gps_window_local["std"],
     "gps_vs_second_window_samples": len(gps_second_window),
     "gps_vs_second_window_max_xy_m": finite_max(parse_float(row, "xy_error_m") for row in gps_second_window),
     "gps_vs_second_window_last_xy_m": finite_last(gps_second_window, "xy_error_m"),
@@ -504,6 +614,10 @@ out = {
     "gps_vs_second_window_rebased_last_xy_m": gps_second_window_rebased["last"],
     "gps_vs_second_window_rebased_mean_xy_m": gps_second_window_rebased["mean"],
     "gps_vs_second_window_rebased_std_xy_m": gps_second_window_rebased["std"],
+    "gps_vs_second_window_local_max_xy_m": gps_second_window_local["max"],
+    "gps_vs_second_window_local_last_xy_m": gps_second_window_local["last"],
+    "gps_vs_second_window_local_mean_xy_m": gps_second_window_local["mean"],
+    "gps_vs_second_window_local_std_xy_m": gps_second_window_local["std"],
     "gnss_window_samples": len(gnss_window),
     "gnss_window_max_pos_residual_h_m": finite_max(gnss_residual_h),
     "gnss_window_last_pos_residual_h_m": gnss_residual_h[-1] if gnss_residual_h else float("nan"),
@@ -591,6 +705,9 @@ if [[ -n "${GPS_VS_POSE_TOPIC}" ]]; then
     -p odom_topic:="${GPS_VS_POSE_TOPIC}"
     -p csv_path:="${GPS_VS_POSE_CSV}"
     -p status_print_period_sec:=10.0
+    -p global_alignment_holdoff_sec:="${GPS_PROBE_GLOBAL_ALIGNMENT_HOLDOFF_SEC}"
+    -p global_alignment_min_pairs:="${GPS_PROBE_GLOBAL_ALIGNMENT_MIN_PAIRS}"
+    -p local_reanchor_window_sec:="${GPS_PROBE_LOCAL_REANCHOR_WINDOW_SEC}"
   )
   GPS_PROBE_PID="$(run_bash_with_ros "${RUN_DIR}/gps_vs_pose.log" "${GPS_PROBE_CMD[@]}")"
 fi
@@ -604,6 +721,9 @@ if [[ -n "${GPS_VS_SECOND_POSE_TOPIC}" ]]; then
     -p odom_topic:="${GPS_VS_SECOND_POSE_TOPIC}"
     -p csv_path:="${GPS_VS_SECOND_CSV}"
     -p status_print_period_sec:=10.0
+    -p global_alignment_holdoff_sec:="${GPS_PROBE_GLOBAL_ALIGNMENT_HOLDOFF_SEC}"
+    -p global_alignment_min_pairs:="${GPS_PROBE_GLOBAL_ALIGNMENT_MIN_PAIRS}"
+    -p local_reanchor_window_sec:="${GPS_PROBE_LOCAL_REANCHOR_WINDOW_SEC}"
   )
   GPS_SECOND_PROBE_PID="$(run_bash_with_ros "${RUN_DIR}/gps_vs_second_pose.log" "${GPS_SECOND_PROBE_CMD[@]}")"
 fi
@@ -618,11 +738,14 @@ declare -a SMOKE_CMD=(
   --gap-probe-start-delay "${GAP_PROBE_START_DELAY}"
   --gap-probe-window "${GAP_PROBE_WINDOW}"
   --mission-timeout "${MISSION_TIMEOUT_SEC}"
+  --post-mission-settle "${POST_MISSION_SETTLE_SEC}"
   --print-period "${SMOKE_PRINT_PERIOD_SEC}"
   --skip-pull-mission-on-exit
 )
 if [[ "${EXIT_AFTER_GAP_PROBE}" == "1" ]]; then
   SMOKE_CMD+=(--exit-after-gap-probe)
+else
+  SMOKE_CMD+=(--require-disarm-on-success)
 fi
 for item in "${EXTRA_SMOKE_ARGS[@]}"; do
   SMOKE_CMD+=("${item}")
