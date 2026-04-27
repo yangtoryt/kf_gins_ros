@@ -37,6 +37,7 @@ class PoseSample:
     x_m: float
     y_m: float
     z_m: float
+    sequence: int
 
 
 @dataclass
@@ -61,6 +62,13 @@ class GpsVsPoseProbe(Node):
         self.status_print_period_sec = float(self.declare_parameter("status_print_period_sec", 5.0).value)
         self.csv_flush_interval = max(1, int(self.declare_parameter("csv_flush_interval", 20).value))
         dynamic_param = ParameterDescriptor(dynamic_typing=True)
+        self.pair_after_newer_pose = bool(
+            self.declare_parameter("pair_after_newer_pose", True).value
+        )
+        self.max_pair_wait_sec = max(
+            0.0,
+            float(self.declare_parameter("max_pair_wait_sec", 0.25, descriptor=dynamic_param).value),
+        )
         self.global_alignment_holdoff_sec = max(
             0.0,
             float(
@@ -78,6 +86,7 @@ class GpsVsPoseProbe(Node):
 
         self.fix_buf: Deque[FixSample] = deque(maxlen=max(10, self.buffer_len))
         self.pose_buf: Deque[PoseSample] = deque(maxlen=max(10, self.buffer_len))
+        self.pending_fix_buf: Deque[FixSample] = deque(maxlen=max(10, self.buffer_len))
         self.error_buf: Deque[ErrorSample] = deque(maxlen=max(10, self.buffer_len))
         self.last_pair_key: Optional[Tuple[float, float]] = None
 
@@ -98,6 +107,7 @@ class GpsVsPoseProbe(Node):
         self.global_alignment_anchor_ros_time_sec: Optional[float] = None
 
         self.samples_written = 0
+        self.pose_samples_seen = 0
         self.last_status_sec = 0.0
         self.rows_since_flush = 0
 
@@ -121,6 +131,8 @@ class GpsVsPoseProbe(Node):
             f"  odom_topic: {self.odom_topic}\n"
             f"  csv_path: {self.csv_path or '(disabled)'}\n"
             f"  sync_tolerance_sec: {self.sync_tolerance_sec:.3f}\n"
+            f"  pair_after_newer_pose: {self.pair_after_newer_pose}\n"
+            f"  max_pair_wait_sec: {self.max_pair_wait_sec:.3f}\n"
             f"  global_alignment_holdoff_sec: {self.global_alignment_holdoff_sec:.3f}\n"
             f"  global_alignment_min_pairs: {self.global_alignment_min_pairs}\n"
             f"  local_reanchor_window_sec: {self.local_reanchor_window_sec:.3f}"
@@ -140,6 +152,11 @@ class GpsVsPoseProbe(Node):
             "gps_stamp_sec",
             "pose_stamp_sec",
             "pair_dt_ms",
+            "pose_sequence",
+            "pose_buffer_latest_stamp_sec",
+            "pose_waited_for_newer_stamp",
+            "pending_pair_age_sec",
+            "same_stamp_pose_count",
             "gps_lat_deg",
             "gps_lon_deg",
             "gps_alt_m",
@@ -255,7 +272,14 @@ class GpsVsPoseProbe(Node):
         best_dt = float("inf")
         for item in self.pose_buf:
             dt = item.stamp_sec - target_sec
-            if abs(dt) < abs(best_dt):
+            if (
+                abs(dt) < abs(best_dt) - 1e-12
+                or (
+                    best is not None
+                    and abs(abs(dt) - abs(best_dt)) <= 1e-12
+                    and item.sequence > best.sequence
+                )
+            ):
                 best = item
                 best_dt = dt
         if best is None or abs(best_dt) > self.sync_tolerance_sec:
@@ -389,24 +413,92 @@ class GpsVsPoseProbe(Node):
             up_m=float(up_m),
         )
         self.fix_buf.append(sample)
-        self._maybe_write_pair_from_fix(sample)
+        self.pending_fix_buf.append(sample)
+        self._drain_pending_pairs()
 
     def _odom_callback(self, msg: Odometry) -> None:
+        self.pose_samples_seen += 1
         sample = PoseSample(
             stamp_sec=self._stamp_sec(msg.header.stamp),
             x_m=float(msg.pose.pose.position.x),
             y_m=float(msg.pose.pose.position.y),
             z_m=float(msg.pose.pose.position.z),
+            sequence=self.pose_samples_seen,
         )
         self.pose_buf.append(sample)
+        self._drain_pending_pairs()
 
-    def _maybe_write_pair_from_fix(self, fix: FixSample) -> None:
-        pose, dt_sec = self._find_closest_pose(fix.stamp_sec)
-        if pose is None:
+    def _latest_pose_stamp_sec(self) -> float:
+        if not self.pose_buf:
+            return float("nan")
+        return self.pose_buf[-1].stamp_sec
+
+    def _same_stamp_pose_count(self, stamp_sec: float) -> int:
+        return sum(1 for item in self.pose_buf if abs(item.stamp_sec - stamp_sec) <= 1e-12)
+
+    def _fix_ready_for_pairing(self, fix: FixSample, now_sec: float, latest_pose_stamp_sec: float) -> bool:
+        if not self.pair_after_newer_pose:
+            return True
+        if math.isfinite(latest_pose_stamp_sec) and latest_pose_stamp_sec > fix.stamp_sec + 1e-9:
+            return True
+        if self.max_pair_wait_sec > 0.0 and now_sec - fix.stamp_sec >= self.max_pair_wait_sec:
+            return True
+        return False
+
+    def _drain_pending_pairs(self) -> None:
+        if not self.pending_fix_buf or not self.pose_buf:
             return
-        self._write_pair(fix, pose, dt_sec)
 
-    def _write_pair(self, fix: FixSample, pose: PoseSample, dt_sec: float) -> None:
+        now_sec = self._ros_time_sec()
+        latest_pose_stamp_sec = self._latest_pose_stamp_sec()
+        while self.pending_fix_buf:
+            fix = self.pending_fix_buf[0]
+            if not self._fix_ready_for_pairing(fix, now_sec, latest_pose_stamp_sec):
+                break
+
+            pose, dt_sec = self._find_closest_pose(fix.stamp_sec)
+            if pose is None:
+                latest_beyond_fix = (
+                    math.isfinite(latest_pose_stamp_sec)
+                    and latest_pose_stamp_sec > fix.stamp_sec + self.sync_tolerance_sec
+                )
+                timed_out = (
+                    self.max_pair_wait_sec > 0.0
+                    and now_sec - fix.stamp_sec >= self.max_pair_wait_sec
+                )
+                if latest_beyond_fix or timed_out:
+                    self.pending_fix_buf.popleft()
+                    continue
+                break
+
+            pending_pair_age_sec = now_sec - fix.stamp_sec
+            waited_for_newer_stamp = (
+                self.pair_after_newer_pose
+                and math.isfinite(latest_pose_stamp_sec)
+                and latest_pose_stamp_sec > fix.stamp_sec + 1e-9
+            )
+            same_stamp_pose_count = self._same_stamp_pose_count(pose.stamp_sec)
+            self._write_pair(
+                fix,
+                pose,
+                dt_sec,
+                latest_pose_stamp_sec,
+                waited_for_newer_stamp,
+                pending_pair_age_sec,
+                same_stamp_pose_count,
+            )
+            self.pending_fix_buf.popleft()
+
+    def _write_pair(
+        self,
+        fix: FixSample,
+        pose: PoseSample,
+        dt_sec: float,
+        latest_pose_stamp_sec: float,
+        waited_for_newer_stamp: bool,
+        pending_pair_age_sec: float,
+        same_stamp_pose_count: int,
+    ) -> None:
         pair_key = (fix.stamp_sec, pose.stamp_sec)
         if self.last_pair_key == pair_key:
             return
@@ -464,6 +556,11 @@ class GpsVsPoseProbe(Node):
                     "gps_stamp_sec": fix.stamp_sec,
                     "pose_stamp_sec": pose.stamp_sec,
                     "pair_dt_ms": dt_sec * 1000.0,
+                    "pose_sequence": pose.sequence,
+                    "pose_buffer_latest_stamp_sec": latest_pose_stamp_sec,
+                    "pose_waited_for_newer_stamp": int(waited_for_newer_stamp),
+                    "pending_pair_age_sec": pending_pair_age_sec,
+                    "same_stamp_pose_count": same_stamp_pose_count,
                     "gps_lat_deg": fix.lat_deg,
                     "gps_lon_deg": fix.lon_deg,
                     "gps_alt_m": fix.alt_m,

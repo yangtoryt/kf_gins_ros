@@ -77,6 +77,8 @@ COMPARE_ENABLE_GT_PATH="${PX4_SAFE_COMPARE_ENABLE_GT_PATH:-false}"
 COMPARE_ENABLE_IEKF_ALIGNED_PATH="${PX4_SAFE_COMPARE_ENABLE_IEKF_ALIGNED_PATH:-false}"
 COMPARE_CSV_PATH="${PX4_SAFE_COMPARE_CSV_PATH:-${RUN_DIR}/comparison_metrics.csv}"
 COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH:-${RUN_DIR}/gnss_update_debug.csv}"
+COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH:-${RUN_DIR}/heading_update_debug.csv}"
+COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH:-${RUN_DIR}/state_publish_debug.csv}"
 GPS_PROBE_GPS_TOPIC="${PX4_SAFE_GPS_PROBE_GPS_TOPIC:-/gps/fix}"
 GPS_PROBE_ODOM_TOPIC="${PX4_SAFE_GPS_PROBE_ODOM_TOPIC:-/ekf2/pose_odom}"
 GPS_PROBE_SECOND_ODOM_TOPIC="${PX4_SAFE_GPS_PROBE_SECOND_ODOM_TOPIC:-/kf_gins/odom_raw}"
@@ -86,6 +88,8 @@ GPS_PROBE_STATUS_PRINT_PERIOD_SEC="${PX4_SAFE_GPS_PROBE_STATUS_PRINT_PERIOD_SEC:
 GPS_PROBE_GLOBAL_ALIGNMENT_HOLDOFF_SEC="${PX4_SAFE_GPS_PROBE_GLOBAL_ALIGNMENT_HOLDOFF_SEC:-0.0}"
 GPS_PROBE_GLOBAL_ALIGNMENT_MIN_PAIRS="${PX4_SAFE_GPS_PROBE_GLOBAL_ALIGNMENT_MIN_PAIRS:-1}"
 GPS_PROBE_LOCAL_REANCHOR_WINDOW_SEC="${PX4_SAFE_GPS_PROBE_LOCAL_REANCHOR_WINDOW_SEC:-6.0}"
+GPS_PROBE_PAIR_AFTER_NEWER_POSE="${PX4_SAFE_GPS_PROBE_PAIR_AFTER_NEWER_POSE:-true}"
+GPS_PROBE_MAX_PAIR_WAIT_SEC="${PX4_SAFE_GPS_PROBE_MAX_PAIR_WAIT_SEC:-0.25}"
 GPS_PROBE_DELAY_AFTER_COMPARE_SEC="${PX4_SAFE_GPS_PROBE_DELAY_AFTER_COMPARE_SEC:-3}"
 
 AGENT_LOG="${RUN_DIR}/agent.log"
@@ -778,7 +782,9 @@ start_compare() {
       enable_gt_path:='${COMPARE_ENABLE_GT_PATH}' \
       enable_iekf_aligned_path:='${COMPARE_ENABLE_IEKF_ALIGNED_PATH}' \
       comparison_csv_path:='${COMPARE_CSV_PATH}' \
-      gnss_update_debug_csv_path:='${COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH}'
+      gnss_update_debug_csv_path:='${COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH}' \
+      heading_update_debug_csv_path:='${COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH}' \
+      state_publish_debug_csv_path:='${COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH}'
   " > "${COMPARE_LOG}" 2>&1 < /dev/null &
   COMPARE_PID=$!
   save_pids
@@ -831,7 +837,9 @@ start_single_gps_probe() {
       -p status_print_period_sec:='${GPS_PROBE_STATUS_PRINT_PERIOD_SEC}' \
       -p global_alignment_holdoff_sec:='${GPS_PROBE_GLOBAL_ALIGNMENT_HOLDOFF_SEC}' \
       -p global_alignment_min_pairs:='${GPS_PROBE_GLOBAL_ALIGNMENT_MIN_PAIRS}' \
-      -p local_reanchor_window_sec:='${GPS_PROBE_LOCAL_REANCHOR_WINDOW_SEC}'
+      -p local_reanchor_window_sec:='${GPS_PROBE_LOCAL_REANCHOR_WINDOW_SEC}' \
+      -p pair_after_newer_pose:='${GPS_PROBE_PAIR_AFTER_NEWER_POSE}' \
+      -p max_pair_wait_sec:='${GPS_PROBE_MAX_PAIR_WAIT_SEC}'
   " > "${log_path}" 2>&1 < /dev/null &
   pid=$!
   printf -v "${pid_var_name}" '%s' "${pid}"
@@ -890,6 +898,7 @@ show_status() {
   echo "  mavros_guided_no_origin=$(count_fixed 'PositionTargetGlobal failed because no origin' "${MAVROS_LOG}")"
   echo "  compare_started=$(count_fixed '[INFO] [launch]: All log files can be found below' "${COMPARE_LOG}")"
   echo "  comparison_topics_seen=$(count_fixed '/comparison/' "${COMPARE_LOG}")"
+  echo "  state_publish_debug_csv_present=$([[ -s "${COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH}" ]] && echo 1 || echo 0)"
   echo "  gps_vs_pose_csv_present=$([[ -s "${GPS_PROBE_CSV_PATH}" ]] && echo 1 || echo 0)"
   echo "  gps_vs_second_csv_present=$([[ -s "${GPS_PROBE_SECOND_CSV_PATH}" ]] && echo 1 || echo 0)"
 

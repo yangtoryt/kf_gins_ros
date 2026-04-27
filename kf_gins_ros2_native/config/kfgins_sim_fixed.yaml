@@ -61,10 +61,20 @@ kf_gins_node:
     heading_post_turn_reacquire_max_residual_deg: 45.0
     heading_post_turn_reacquire_std_deg: 1.5
     heading_post_turn_cruise_track_std_deg: 1.0
+    heading_post_turn_cruise_track_max_gyro_deg_s: 3.5
+    heading_post_turn_cruise_track_min_horizontal_speed_mps: 4.8
+    heading_post_turn_low_hspeed_cluster_enable: false
+    heading_post_turn_low_hspeed_cluster_min_horizontal_speed_mps: 4.3
+    heading_post_turn_low_hspeed_cluster_max_horizontal_speed_mps: 4.6
+    heading_post_turn_low_hspeed_cluster_max_vertical_speed_mps: 0.2
+    heading_post_turn_low_hspeed_cluster_max_gyro_deg_s: 2.0
+    heading_post_turn_low_hspeed_cluster_max_source_yaw_rate_deg_s: 0.5
     heading_post_turn_reacquire_hold_sec: 4.0
     heading_post_turn_reacquire_max_rate_hz: 5.0
     heading_post_turn_force_relock_enable: true
     heading_post_turn_force_relock_min_residual_deg: 1.1
+    heading_post_turn_cruise_track_continue_sec: 1.5
+    heading_post_turn_cruise_track_continue_min_residual_deg: 0.8
     heading_post_turn_force_relock_min_consecutive_blocks: 3
     heading_post_turn_force_relock_yaw_std_deg: 1.5
     heading_post_turn_force_relock_max_rate_hz: 1.0
@@ -72,17 +82,22 @@ kf_gins_node:
     heading_post_turn_hold_force_relock_min_residual_deg: 4.0
     heading_post_turn_hold_force_relock_min_consecutive_blocks: 4
     heading_armed_cruise_force_relock_enable: true
+    heading_armed_cruise_track_min_residual_deg: 1.0
+    heading_post_turn_armed_cruise_track_window_sec: 0.0
+    heading_post_turn_armed_cruise_track_min_residual_deg: 0.55
+    heading_post_turn_armed_cruise_track_min_horizontal_speed_mps: 4.8
+    heading_post_turn_armed_cruise_track_followthrough_sec: 0.0
     heading_armed_cruise_force_relock_min_residual_deg: 1.8
     heading_armed_cruise_force_relock_min_consecutive_blocks: 6
-    heading_armed_cruise_force_relock_min_horizontal_speed_mps: 4.0
+    heading_armed_cruise_force_relock_min_horizontal_speed_mps: 4.8
     heading_armed_cruise_force_relock_max_vertical_speed_mps: 1.0
     heading_armed_cruise_force_relock_max_gyro_deg_s: 2.0
     heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s: 2.0
-    heading_armed_cruise_force_relock_yaw_std_deg: 1.5
+    heading_armed_cruise_force_relock_yaw_std_deg: 1.0
     heading_armed_cruise_force_relock_max_rate_hz: 1.0
     heading_underreaction_force_relock_enable: true
-    heading_underreaction_force_relock_min_residual_deg: 1.1
-    heading_post_turn_soft_underreaction_min_residual_deg: 1.2
+    heading_underreaction_force_relock_min_residual_deg: 1.40
+    heading_post_turn_soft_underreaction_min_residual_deg: 1.5
     heading_underreaction_force_relock_min_remaining_ratio: 0.85
     heading_underreaction_force_relock_yaw_std_deg: 1.5
     heading_underreaction_force_relock_max_rate_hz: 4.0

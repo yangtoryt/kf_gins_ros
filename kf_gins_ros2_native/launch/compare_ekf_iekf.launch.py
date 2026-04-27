@@ -115,6 +115,14 @@ def generate_launch_description():
         'gnss_update_debug_csv_path', default_value='',
         description='Optional CSV output written by kf_gins_node for applied GNSS update diagnostics'
     )
+    heading_update_debug_csv_path = DeclareLaunchArgument(
+        'heading_update_debug_csv_path', default_value='',
+        description='Optional CSV output written by kf_gins_node for every heading update/relock event'
+    )
+    state_publish_debug_csv_path = DeclareLaunchArgument(
+        'state_publish_debug_csv_path', default_value='',
+        description='Optional CSV output written by kf_gins_node for every state publish'
+    )
     armed_cruise_native_gnss_vel_override_enable = DeclareLaunchArgument(
         'armed_cruise_native_gnss_vel_override_enable', default_value='true',
         description='Tighten native GNSS velocity std during armed late-cruise motion context'
@@ -764,6 +772,8 @@ def generate_launch_description():
                 'sim_gnss_std_h_m': LaunchConfiguration('sim_gnss_std_h_m'),
                 'sim_gnss_std_u_m': LaunchConfiguration('sim_gnss_std_u_m'),
                 'gnss_update_debug_csv_path': LaunchConfiguration('gnss_update_debug_csv_path'),
+                'heading_update_debug_csv_path': LaunchConfiguration('heading_update_debug_csv_path'),
+                'state_publish_debug_csv_path': LaunchConfiguration('state_publish_debug_csv_path'),
                 'armed_cruise_native_gnss_vel_override_enable': LaunchConfiguration('armed_cruise_native_gnss_vel_override_enable'),
                 'armed_cruise_gnss_pos_override_enable': LaunchConfiguration('armed_cruise_gnss_pos_override_enable'),
                 'armed_cruise_gnss_pos_std_h_m': LaunchConfiguration('armed_cruise_gnss_pos_std_h_m'),
@@ -1028,6 +1038,8 @@ def generate_launch_description():
         iekf_fallback_topic,
         comparison_csv_path,
         gnss_update_debug_csv_path,
+        heading_update_debug_csv_path,
+        state_publish_debug_csv_path,
         armed_cruise_native_gnss_vel_override_enable,
         armed_cruise_gnss_pos_override_enable,
         armed_cruise_gnss_pos_std_h_m,

@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -238,6 +239,10 @@ public:
       this->declare_parameter<double>("post_flight_vertical_cov_reopen_accbias_std_z_mps2", 0.05);
     gnss_update_debug_csv_path_ =
       this->declare_parameter<std::string>("gnss_update_debug_csv_path", "");
+    heading_update_debug_csv_path_ =
+      this->declare_parameter<std::string>("heading_update_debug_csv_path", "");
+    state_publish_debug_csv_path_ =
+      this->declare_parameter<std::string>("state_publish_debug_csv_path", "");
     use_online_reset_covariance_ = this->declare_parameter<bool>("use_online_reset_covariance", true);
     reset_pos_std_m_ = this->declare_parameter<double>("reset_pos_std_m", 5.0);
     reset_vel_std_mps_ = this->declare_parameter<double>("reset_vel_std_mps", 5.0);
@@ -272,6 +277,28 @@ public:
     heading_post_turn_cruise_track_std_deg_ =
       this->declare_parameter<double>(
         "heading_post_turn_cruise_track_std_deg", heading_post_turn_reacquire_std_deg_);
+    heading_post_turn_cruise_track_max_gyro_deg_s_ =
+      this->declare_parameter<double>("heading_post_turn_cruise_track_max_gyro_deg_s", 3.5);
+    heading_post_turn_cruise_track_min_horizontal_speed_mps_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_cruise_track_min_horizontal_speed_mps", 4.0);
+    heading_post_turn_low_hspeed_cluster_enable_ =
+      this->declare_parameter<bool>("heading_post_turn_low_hspeed_cluster_enable", false);
+    heading_post_turn_low_hspeed_cluster_min_horizontal_speed_mps_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_low_hspeed_cluster_min_horizontal_speed_mps", 4.3);
+    heading_post_turn_low_hspeed_cluster_max_horizontal_speed_mps_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_low_hspeed_cluster_max_horizontal_speed_mps", 4.6);
+    heading_post_turn_low_hspeed_cluster_max_vertical_speed_mps_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_low_hspeed_cluster_max_vertical_speed_mps", 0.2);
+    heading_post_turn_low_hspeed_cluster_max_gyro_deg_s_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_low_hspeed_cluster_max_gyro_deg_s", 2.0);
+    heading_post_turn_low_hspeed_cluster_max_source_yaw_rate_deg_s_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_low_hspeed_cluster_max_source_yaw_rate_deg_s", 0.5);
     heading_post_turn_reacquire_hold_sec_ =
       this->declare_parameter<double>("heading_post_turn_reacquire_hold_sec", 4.0);
     heading_post_turn_reacquire_max_rate_hz_ =
@@ -280,6 +307,12 @@ public:
       this->declare_parameter<bool>("heading_post_turn_force_relock_enable", true);
     heading_post_turn_force_relock_min_residual_deg_ =
       this->declare_parameter<double>("heading_post_turn_force_relock_min_residual_deg", 20.0);
+    heading_post_turn_cruise_track_continue_sec_ =
+      this->declare_parameter<double>("heading_post_turn_cruise_track_continue_sec", 1.5);
+    heading_post_turn_cruise_track_continue_min_residual_deg_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_cruise_track_continue_min_residual_deg",
+        0.8);
     heading_post_turn_force_relock_min_consecutive_blocks_ =
       this->declare_parameter<int>("heading_post_turn_force_relock_min_consecutive_blocks", 3);
     heading_post_turn_force_relock_yaw_std_deg_ =
@@ -294,6 +327,22 @@ public:
       this->declare_parameter<int>("heading_post_turn_hold_force_relock_min_consecutive_blocks", 20);
     heading_armed_cruise_force_relock_enable_ =
       this->declare_parameter<bool>("heading_armed_cruise_force_relock_enable", true);
+    heading_armed_cruise_track_min_residual_deg_ =
+      this->declare_parameter<double>("heading_armed_cruise_track_min_residual_deg", 0.9);
+    heading_post_turn_armed_cruise_track_window_sec_ =
+      this->declare_parameter<double>("heading_post_turn_armed_cruise_track_window_sec", 0.0);
+    heading_post_turn_armed_cruise_track_min_residual_deg_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_armed_cruise_track_min_residual_deg",
+        heading_armed_cruise_track_min_residual_deg_);
+    heading_post_turn_armed_cruise_track_min_horizontal_speed_mps_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_armed_cruise_track_min_horizontal_speed_mps",
+        4.0);
+    heading_post_turn_armed_cruise_track_followthrough_sec_ =
+      this->declare_parameter<double>(
+        "heading_post_turn_armed_cruise_track_followthrough_sec",
+        0.0);
     heading_armed_cruise_force_relock_min_residual_deg_ =
       this->declare_parameter<double>("heading_armed_cruise_force_relock_min_residual_deg", 13.0);
     heading_armed_cruise_force_relock_min_consecutive_blocks_ =
@@ -737,6 +786,8 @@ public:
       gnss_source_.c_str(),
       active_gnss_topic_name_.c_str());
     openGnssUpdateDebugCsv_();
+    openHeadingUpdateDebugCsv_();
+    openStatePublishDebugCsv_();
 
   }
 
@@ -792,6 +843,11 @@ private:
       last_post_turn_reacquire_time_sec_ = std::numeric_limits<double>::quiet_NaN();
       last_post_turn_reacquire_apply_time_sec_ = std::numeric_limits<double>::quiet_NaN();
       post_turn_hold_end_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+      post_turn_cruise_track_continue_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+      post_turn_armed_cruise_track_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+      post_turn_armed_cruise_track_followthrough_until_sec_ =
+        std::numeric_limits<double>::quiet_NaN();
+      post_turn_armed_cruise_track_followthrough_remaining_ = 0;
       last_post_turn_force_relock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
       heading_large_residual_skip_count_ = 0;
       post_turn_blocked_count_ = 0;
@@ -1125,6 +1181,8 @@ private:
     core_time_sec_ = 0.0;
     last_core_time_ = -std::numeric_limits<double>::infinity();
     last_gnss_time_sec_ = -std::numeric_limits<double>::infinity();
+    last_gnss_source_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    last_gnss_rx_ros_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     have_prev_gnss_for_vel_ = false;
     last_zupt_reset_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     last_heading_attempt_time_sec_ = std::numeric_limits<double>::quiet_NaN();
@@ -1138,6 +1196,11 @@ private:
     last_post_turn_reacquire_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     last_post_turn_reacquire_apply_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     post_turn_hold_end_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    post_turn_cruise_track_continue_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+    post_turn_armed_cruise_track_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+    post_turn_armed_cruise_track_followthrough_until_sec_ =
+      std::numeric_limits<double>::quiet_NaN();
+    post_turn_armed_cruise_track_followthrough_remaining_ = 0;
     last_post_turn_force_relock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     heading_large_residual_skip_count_ = 0;
     post_turn_blocked_count_ = 0;
@@ -1179,6 +1242,8 @@ private:
     core_time_sec_ = 0.0;
     last_core_time_ = -std::numeric_limits<double>::infinity();
     last_gnss_time_sec_ = -std::numeric_limits<double>::infinity();
+    last_gnss_source_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    last_gnss_rx_ros_time_sec_ = std::numeric_limits<double>::quiet_NaN();
 
     // 清空可视化轨迹，避免“蜘蛛网”
     path_msg_.poses.clear();
@@ -1207,6 +1272,11 @@ private:
     last_post_turn_reacquire_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     last_post_turn_reacquire_apply_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     post_turn_hold_end_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    post_turn_cruise_track_continue_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+    post_turn_armed_cruise_track_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+    post_turn_armed_cruise_track_followthrough_until_sec_ =
+      std::numeric_limits<double>::quiet_NaN();
+    post_turn_armed_cruise_track_followthrough_remaining_ = 0;
     last_post_turn_force_relock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     heading_large_residual_skip_count_ = 0;
     post_turn_blocked_count_ = 0;
@@ -1405,13 +1475,37 @@ private:
     const bool recent_turning = motion_ctx.recent_turning;
     const bool post_turn_hold_active = motion_ctx.post_turn_hold_active;
     const bool post_turn_context = motion_ctx.post_turn_context;
+    const bool post_turn_tracking_motion_context =
+      post_turn_context ||
+      motion_ctx.post_turn_cruise_track_continue_active;
     const bool armed_cruise_force_relock_context = motion_ctx.armed_cruise_force_relock_context;
+    const bool post_turn_armed_cruise_track_motion_ok =
+      armed_cruise_force_relock_context &&
+      motion_ctx.armed_cruise_force_relock_gyro_ok &&
+      motion_ctx.armed_cruise_force_relock_source_rate_ok &&
+      (heading_post_turn_armed_cruise_track_min_horizontal_speed_mps_ <= 0.0 ||
+       last_mavros_horizontal_speed_mps_ >=
+         heading_post_turn_armed_cruise_track_min_horizontal_speed_mps_);
+    const bool post_turn_armed_cruise_track_window_active =
+      post_turn_armed_cruise_track_motion_ok &&
+      std::isfinite(post_turn_armed_cruise_track_until_sec_) &&
+      heading_post_turn_armed_cruise_track_window_sec_ > 0.0 &&
+      now_sec <= post_turn_armed_cruise_track_until_sec_;
+    const bool post_turn_armed_cruise_track_followthrough_active =
+      post_turn_armed_cruise_track_motion_ok &&
+      post_turn_armed_cruise_track_followthrough_remaining_ > 0 &&
+      std::isfinite(post_turn_armed_cruise_track_followthrough_until_sec_) &&
+      heading_post_turn_armed_cruise_track_followthrough_sec_ > 0.0 &&
+      now_sec <= post_turn_armed_cruise_track_followthrough_until_sec_;
+    const bool post_turn_armed_cruise_track_context =
+      post_turn_armed_cruise_track_window_active ||
+      post_turn_armed_cruise_track_followthrough_active;
     if (mavros_armed_ && turning_now &&
         std::isfinite(heading_update_turn_innovation_gate_deg_) &&
         heading_update_turn_innovation_gate_deg_ > 0.0) {
       innovation_gate_deg =
         std::max(innovation_gate_deg, heading_update_turn_innovation_gate_deg_);
-    } else if (post_turn_context &&
+    } else if (post_turn_tracking_motion_context &&
                std::isfinite(heading_update_turn_innovation_gate_deg_) &&
                heading_update_turn_innovation_gate_deg_ > 0.0) {
       innovation_gate_deg =
@@ -1425,6 +1519,13 @@ private:
     }
 
     const double residual_abs_deg = std::abs(yaw_residual_deg);
+    const bool post_turn_cruise_track_continue_context =
+      motion_ctx.post_turn_cruise_track_continue_active &&
+      residual_abs_deg >=
+        std::max(0.0, heading_post_turn_cruise_track_continue_min_residual_deg_);
+    const bool post_turn_tracking_context =
+      post_turn_context ||
+      post_turn_cruise_track_continue_context;
     const bool risky_armed_plain_heading_context =
       mavros_armed_ &&
       motion_ctx.vertical_dominant_low_horizontal_motion &&
@@ -1471,8 +1572,9 @@ private:
           heading_measurement_std_deg = turn_track_std_deg;
           heading_mode = "turn_track";
         }
-      } else if (post_turn_context && motion_ctx.post_turn_track_motion_ok) {
-        const bool post_turn_cruise_track_context = motion_ctx.post_turn_cruise_motion_ok;
+      } else if (post_turn_tracking_context && motion_ctx.post_turn_track_motion_ok) {
+        const bool post_turn_cruise_track_context =
+          motion_ctx.post_turn_cruise_motion_ok || post_turn_cruise_track_continue_context;
         const double post_turn_track_std_deg =
           std::max(
             0.1,
@@ -1482,14 +1584,30 @@ private:
                 : heading_post_turn_reacquire_std_deg_));
         if (post_turn_track_std_deg < heading_measurement_std_deg) {
           heading_measurement_std_deg = post_turn_track_std_deg;
-          heading_mode =
-            post_turn_cruise_track_context ? "post_turn_cruise_track" : "post_turn_track";
+          if (post_turn_cruise_track_continue_context) {
+            heading_mode = "post_turn_cruise_track_continue";
+          } else if (post_turn_cruise_track_context) {
+            heading_mode = "post_turn_cruise_track";
+          } else {
+            heading_mode = "post_turn_track";
+          }
         }
       }
     }
 
+    // manual42 still showed repeated cruise-like drift growing from roughly
+    // 0.9 deg into generic armed-cruise relock. Apply the tighter cruise
+    // track earlier, but only inside the true cruise-like motion context.
+    double armed_cruise_track_min_residual_deg =
+      std::max(0.0, heading_armed_cruise_track_min_residual_deg_);
+    if (post_turn_armed_cruise_track_context) {
+      armed_cruise_track_min_residual_deg =
+        std::min(
+          armed_cruise_track_min_residual_deg,
+          std::max(0.0, heading_post_turn_armed_cruise_track_min_residual_deg_));
+    }
     if (armed_cruise_force_relock_context &&
-        residual_abs_deg >= std::max(0.0, heading_armed_cruise_force_relock_min_residual_deg_)) {
+        residual_abs_deg >= armed_cruise_track_min_residual_deg) {
       const double cruise_track_std_deg =
         std::max(0.1, std::abs(heading_armed_cruise_force_relock_yaw_std_deg_));
       if (cruise_track_std_deg < heading_measurement_std_deg) {
@@ -1812,7 +1930,73 @@ private:
     const double residual_after_abs_deg = std::abs(residual_after_deg);
     const double yaw_correction_abs_deg =
       std::abs(shortestAngleDiffDeg_(core_yaw_after_deg, core_yaw_before_deg));
-
+    const bool used_post_turn_cruise_track =
+      std::strcmp(heading_mode, "post_turn_cruise_track") == 0;
+    const bool used_armed_cruise_track =
+      std::strcmp(heading_mode, "armed_cruise_track") == 0;
+    const bool post_turn_armed_cruise_track_window_active_before =
+      post_turn_armed_cruise_track_window_active;
+    const bool post_turn_armed_cruise_track_followthrough_active_before =
+      post_turn_armed_cruise_track_followthrough_active;
+    const bool post_turn_armed_cruise_track_context_before =
+      post_turn_armed_cruise_track_context;
+    const double post_turn_armed_cruise_track_until_before_sec =
+      post_turn_armed_cruise_track_until_sec_;
+    const double post_turn_armed_cruise_track_followthrough_until_before_sec =
+      post_turn_armed_cruise_track_followthrough_until_sec_;
+    const int post_turn_armed_cruise_track_followthrough_remaining_before =
+      post_turn_armed_cruise_track_followthrough_remaining_;
+    const bool post_turn_cruise_track_continue_needed =
+      mavros_armed_ &&
+      recent_turning &&
+      heading_post_turn_cruise_track_continue_sec_ > 0.0 &&
+      used_post_turn_cruise_track &&
+      motion_ctx.post_turn_cruise_motion_ok &&
+      residual_abs_deg >=
+        std::max(0.0, heading_post_turn_cruise_track_continue_min_residual_deg_);
+    if (post_turn_cruise_track_continue_needed) {
+      post_turn_cruise_track_continue_until_sec_ =
+        now_sec + heading_post_turn_cruise_track_continue_sec_;
+    }
+    if (used_post_turn_cruise_track &&
+        heading_post_turn_armed_cruise_track_window_sec_ > 0.0) {
+      post_turn_armed_cruise_track_until_sec_ =
+        now_sec + heading_post_turn_armed_cruise_track_window_sec_;
+      post_turn_armed_cruise_track_followthrough_until_sec_ =
+        std::numeric_limits<double>::quiet_NaN();
+      post_turn_armed_cruise_track_followthrough_remaining_ = 0;
+    }
+    if (used_armed_cruise_track) {
+      if (post_turn_armed_cruise_track_followthrough_active) {
+        post_turn_armed_cruise_track_followthrough_remaining_ =
+          std::max(0, post_turn_armed_cruise_track_followthrough_remaining_ - 1);
+        if (post_turn_armed_cruise_track_followthrough_remaining_ == 0) {
+          post_turn_armed_cruise_track_followthrough_until_sec_ =
+            std::numeric_limits<double>::quiet_NaN();
+        }
+      } else if (post_turn_armed_cruise_track_window_active &&
+          heading_post_turn_armed_cruise_track_followthrough_sec_ > 0.0) {
+        post_turn_armed_cruise_track_followthrough_until_sec_ =
+          now_sec + heading_post_turn_armed_cruise_track_followthrough_sec_;
+        post_turn_armed_cruise_track_followthrough_remaining_ = 1;
+      }
+      post_turn_armed_cruise_track_until_sec_ =
+        std::numeric_limits<double>::quiet_NaN();
+    }
+    const bool post_turn_armed_cruise_track_window_active_after =
+      post_turn_armed_cruise_track_motion_ok &&
+      std::isfinite(post_turn_armed_cruise_track_until_sec_) &&
+      heading_post_turn_armed_cruise_track_window_sec_ > 0.0 &&
+      now_sec <= post_turn_armed_cruise_track_until_sec_;
+    const bool post_turn_armed_cruise_track_followthrough_active_after =
+      post_turn_armed_cruise_track_motion_ok &&
+      post_turn_armed_cruise_track_followthrough_remaining_ > 0 &&
+      std::isfinite(post_turn_armed_cruise_track_followthrough_until_sec_) &&
+      heading_post_turn_armed_cruise_track_followthrough_sec_ > 0.0 &&
+      now_sec <= post_turn_armed_cruise_track_followthrough_until_sec_;
+    const bool post_turn_armed_cruise_track_context_after =
+      post_turn_armed_cruise_track_window_active_after ||
+      post_turn_armed_cruise_track_followthrough_active_after;
     const double underreaction_min_period_sec =
       heading_underreaction_force_relock_max_rate_hz_ > 0.0
         ? 1.0 / heading_underreaction_force_relock_max_rate_hz_
@@ -1876,6 +2060,76 @@ private:
       underreaction_gyro_ok &&
       underreaction_source_rate_ok;
 
+    HeadingUpdateDebugEvent heading_debug_event;
+    heading_debug_event.event_type = "ingest";
+    heading_debug_event.heading_mode = heading_mode;
+    heading_debug_event.ros_time_sec = now_sec;
+    heading_debug_event.update_time_sec = t_sec;
+    heading_debug_event.residual_before_deg = yaw_residual_deg;
+    heading_debug_event.residual_after_deg = residual_after_deg;
+    heading_debug_event.core_yaw_before_deg = core_yaw_before_deg;
+    heading_debug_event.core_yaw_after_deg = core_yaw_after_deg;
+    heading_debug_event.raw_heading_deg = raw_heading_deg;
+    heading_debug_event.measurement_heading_deg = heading_measurement_deg;
+    heading_debug_event.measurement_std_deg = heading_measurement_std_deg;
+    heading_debug_event.innovation_gate_deg = innovation_gate_deg;
+    heading_debug_event.yaw_correction_abs_deg = yaw_correction_abs_deg;
+    heading_debug_event.armed = mavros_armed_;
+    heading_debug_event.turning_now = turning_now;
+    heading_debug_event.recent_turning = recent_turning;
+    heading_debug_event.post_turn_hold_active = post_turn_hold_active;
+    heading_debug_event.post_turn_context = post_turn_context;
+    heading_debug_event.post_turn_track_motion_ok = motion_ctx.post_turn_track_motion_ok;
+    heading_debug_event.post_turn_cruise_motion_ok = motion_ctx.post_turn_cruise_motion_ok;
+    heading_debug_event.post_turn_low_hspeed_cluster_ok =
+      motion_ctx.post_turn_low_hspeed_cluster_ok;
+    heading_debug_event.post_turn_cruise_track_continue_active =
+      motion_ctx.post_turn_cruise_track_continue_active;
+    heading_debug_event.armed_cruise_context = armed_cruise_force_relock_context;
+    heading_debug_event.armed_cruise_gyro_ok = motion_ctx.armed_cruise_force_relock_gyro_ok;
+    heading_debug_event.armed_cruise_source_rate_ok =
+      motion_ctx.armed_cruise_force_relock_source_rate_ok;
+    heading_debug_event.post_turn_armed_cruise_track_motion_ok =
+      post_turn_armed_cruise_track_motion_ok;
+    heading_debug_event.post_turn_window_active_before =
+      post_turn_armed_cruise_track_window_active_before;
+    heading_debug_event.post_turn_followthrough_active_before =
+      post_turn_armed_cruise_track_followthrough_active_before;
+    heading_debug_event.post_turn_context_active_before =
+      post_turn_armed_cruise_track_context_before;
+    heading_debug_event.post_turn_window_active_after =
+      post_turn_armed_cruise_track_window_active_after;
+    heading_debug_event.post_turn_followthrough_active_after =
+      post_turn_armed_cruise_track_followthrough_active_after;
+    heading_debug_event.post_turn_context_active_after =
+      post_turn_armed_cruise_track_context_after;
+    heading_debug_event.post_turn_window_until_before_sec =
+      post_turn_armed_cruise_track_until_before_sec;
+    heading_debug_event.post_turn_followthrough_until_before_sec =
+      post_turn_armed_cruise_track_followthrough_until_before_sec;
+    heading_debug_event.post_turn_followthrough_remaining_before =
+      post_turn_armed_cruise_track_followthrough_remaining_before;
+    heading_debug_event.post_turn_window_until_after_sec =
+      post_turn_armed_cruise_track_until_sec_;
+    heading_debug_event.post_turn_followthrough_until_after_sec =
+      post_turn_armed_cruise_track_followthrough_until_sec_;
+    heading_debug_event.post_turn_followthrough_remaining_after =
+      post_turn_armed_cruise_track_followthrough_remaining_;
+    heading_debug_event.used_post_turn_cruise_track = used_post_turn_cruise_track;
+    heading_debug_event.used_armed_cruise_track = used_armed_cruise_track;
+    heading_debug_event.post_turn_cruise_track_continue_needed =
+      post_turn_cruise_track_continue_needed;
+    heading_debug_event.heading_update_underreacted = heading_update_underreacted;
+    heading_debug_event.horizontal_speed_mps = last_mavros_horizontal_speed_mps_;
+    heading_debug_event.vertical_speed_mps = last_mavros_vertical_speed_mps_;
+    heading_debug_event.speed_mps = last_mavros_speed_mps_;
+    heading_debug_event.gyro_deg_s = last_imu_gyro_norm_deg_s_;
+    heading_debug_event.source_yaw_rate_deg_s = last_mavros_heading_rate_deg_s_;
+    heading_debug_event.heading_large_residual_skip_count = heading_large_residual_skip_count_;
+    heading_debug_event.post_turn_blocked_count = post_turn_blocked_count_;
+    heading_debug_event.armed_cruise_blocked_count = armed_cruise_blocked_count_;
+    logHeadingUpdateDebug_(heading_debug_event);
+
     if (heading_update_underreacted) {
       double force_relock_std_deg =
         std::max(0.1, std::abs(heading_underreaction_force_relock_yaw_std_deg_));
@@ -1890,6 +2144,17 @@ private:
       }
       if (core_->forceYaw(t_sec, raw_heading_deg, force_relock_std_deg)) {
         const auto st_force = core_->current();
+        HeadingUpdateDebugEvent force_debug_event = heading_debug_event;
+        force_debug_event.event_type = "underreaction_force_relock";
+        force_debug_event.heading_mode = "underreaction_force_relock";
+        force_debug_event.residual_after_deg =
+          shortestAngleDiffDeg_(raw_heading_deg, st_force.yaw_deg);
+        force_debug_event.core_yaw_after_deg = st_force.yaw_deg;
+        force_debug_event.measurement_heading_deg = raw_heading_deg;
+        force_debug_event.measurement_std_deg = force_relock_std_deg;
+        force_debug_event.yaw_correction_abs_deg =
+          std::abs(shortestAngleDiffDeg_(st_force.yaw_deg, core_yaw_before_deg));
+        logHeadingUpdateDebug_(force_debug_event);
         last_heading_recovery_time_sec_ = now_sec;
         last_heading_underreaction_force_relock_time_sec_ = now_sec;
         last_heading_update_time_sec_ = now_sec;
@@ -2048,7 +2313,9 @@ private:
       get_logger(), *get_clock(), 2000,
       "Applied heading %s: residual=%.2f deg core_yaw_before=%.2f deg raw_heading=%.2f deg "
       "measurement_heading=%.2f deg std=%.2f deg "
-      "(gate=%.2f deg, armed=%s, turning=%s, recent_turning=%s, post_turn_hold=%s, gyro=%.2f deg/s, speed=%.2f m/s, "
+      "(gate=%.2f deg, armed=%s, turning=%s, recent_turning=%s, post_turn_hold=%s, "
+      "post_turn_window_active=%s, post_turn_followthrough_active=%s, "
+      "post_turn_context_active=%s, gyro=%.2f deg/s, speed=%.2f m/s, "
       "horiz=%.2f m/s, vert=%.2f m/s, source_yaw_rate=%.2f deg/s, core_yaw_after=%.2f deg)",
       heading_mode,
       yaw_residual_deg, core_yaw_before_deg, raw_heading_deg,
@@ -2058,6 +2325,9 @@ private:
       turning_now ? "true" : "false",
       recent_turning ? "true" : "false",
       post_turn_hold_active ? "true" : "false",
+      post_turn_armed_cruise_track_window_active ? "true" : "false",
+      post_turn_armed_cruise_track_followthrough_active ? "true" : "false",
+      post_turn_armed_cruise_track_context ? "true" : "false",
       last_imu_gyro_norm_deg_s_,
       last_mavros_speed_mps_,
       last_mavros_horizontal_speed_mps_,
@@ -2523,6 +2793,8 @@ private:
     last_gnss_lon_rad_ = longitude * M_PI/180.0;
     last_gnss_h_m_     = altitude;
     last_gnss_valid_   = true;
+    last_gnss_source_time_sec_ = t_raw;
+    last_gnss_rx_ros_time_sec_ = now_sec;
 
     // 第一次用 GNSS 设置 ENU 原点；若刚经历 reset，则等待连续稳定 GNSS 样本再重建
     if (!have_origin_) {
@@ -3320,7 +3592,9 @@ private:
     // 2) 位置：启动阶段即便 use_gnss_llh_for_pose_==false，也优先用 GNSS，直到核心LLH和GNSS对齐
     double lat_rad, lon_rad, h_m;
     Eigen::Vector3d enu_core = Eigen::Vector3d::Zero();
+    Eigen::Vector3d enu_gnss = Eigen::Vector3d::Zero();
     bool have_core_enu = false;
+    bool have_gnss_enu = false;
     bool odom_uses_gnss_pose = false;
 
     if (last_gnss_valid_) {
@@ -3335,8 +3609,10 @@ private:
       have_core_enu = isfinite_d(enu_core.x()) && isfinite_d(enu_core.y()) && isfinite_d(enu_core.z());
       double gnss_x, gnss_y, gnss_z;
       geo::llh_to_ecef(last_gnss_lat_rad_, last_gnss_lon_rad_, last_gnss_h_m_, gnss_x, gnss_y, gnss_z);
-      Eigen::Vector3d enu_gnss = geo::ecef_to_enu({gnss_x, gnss_y, gnss_z},
-                                                  origin_ecef_, origin_lat_, origin_lon_);
+      enu_gnss = geo::ecef_to_enu({gnss_x, gnss_y, gnss_z},
+                                  origin_ecef_, origin_lat_, origin_lon_);
+      have_gnss_enu = isfinite_d(enu_gnss.x()) && isfinite_d(enu_gnss.y()) &&
+                      isfinite_d(enu_gnss.z());
 
       const double diff_m = (enu_core - enu_gnss).norm();
       if (std::isfinite(diff_m)) {
@@ -3434,6 +3710,17 @@ private:
     if (have_core_enu) {
       odom_raw_pub_->publish(make_odom_msg(enu_core));
     }
+    logStatePublishDebug_(
+      stamp,
+      odom_uses_gnss_pose,
+      have_core_enu,
+      enu_core,
+      enu_vis,
+      have_gnss_enu,
+      enu_gnss,
+      st.vN,
+      st.vE,
+      st.vD);
 
     std_msgs::msg::Bool fallback_active_msg;
     fallback_active_msg.data = odom_uses_gnss_pose;
@@ -3505,13 +3792,69 @@ private:
     bool recent_turning{false};
     bool post_turn_hold_active{false};
     bool post_turn_context{false};
+    bool post_turn_cruise_track_continue_active{false};
     bool post_turn_track_motion_ok{false};
     bool post_turn_underreaction_motion_ok{false};
+    bool post_turn_low_hspeed_cluster_ok{false};
     bool post_turn_cruise_motion_ok{false};
     bool armed_cruise_force_relock_context{false};
     bool native_velocity_tightening_context{false};
     bool armed_cruise_force_relock_gyro_ok{false};
     bool armed_cruise_force_relock_source_rate_ok{false};
+  };
+
+  struct HeadingUpdateDebugEvent
+  {
+    const char* event_type{"ingest"};
+    const char* heading_mode{"unknown"};
+    double ros_time_sec{std::numeric_limits<double>::quiet_NaN()};
+    double update_time_sec{std::numeric_limits<double>::quiet_NaN()};
+    double residual_before_deg{std::numeric_limits<double>::quiet_NaN()};
+    double residual_after_deg{std::numeric_limits<double>::quiet_NaN()};
+    double core_yaw_before_deg{std::numeric_limits<double>::quiet_NaN()};
+    double core_yaw_after_deg{std::numeric_limits<double>::quiet_NaN()};
+    double raw_heading_deg{std::numeric_limits<double>::quiet_NaN()};
+    double measurement_heading_deg{std::numeric_limits<double>::quiet_NaN()};
+    double measurement_std_deg{std::numeric_limits<double>::quiet_NaN()};
+    double innovation_gate_deg{std::numeric_limits<double>::quiet_NaN()};
+    double yaw_correction_abs_deg{std::numeric_limits<double>::quiet_NaN()};
+    bool armed{false};
+    bool turning_now{false};
+    bool recent_turning{false};
+    bool post_turn_hold_active{false};
+    bool post_turn_context{false};
+    bool post_turn_track_motion_ok{false};
+    bool post_turn_cruise_motion_ok{false};
+    bool post_turn_low_hspeed_cluster_ok{false};
+    bool post_turn_cruise_track_continue_active{false};
+    bool armed_cruise_context{false};
+    bool armed_cruise_gyro_ok{false};
+    bool armed_cruise_source_rate_ok{false};
+    bool post_turn_armed_cruise_track_motion_ok{false};
+    bool post_turn_window_active_before{false};
+    bool post_turn_followthrough_active_before{false};
+    bool post_turn_context_active_before{false};
+    bool post_turn_window_active_after{false};
+    bool post_turn_followthrough_active_after{false};
+    bool post_turn_context_active_after{false};
+    double post_turn_window_until_before_sec{std::numeric_limits<double>::quiet_NaN()};
+    double post_turn_followthrough_until_before_sec{std::numeric_limits<double>::quiet_NaN()};
+    int post_turn_followthrough_remaining_before{0};
+    double post_turn_window_until_after_sec{std::numeric_limits<double>::quiet_NaN()};
+    double post_turn_followthrough_until_after_sec{std::numeric_limits<double>::quiet_NaN()};
+    int post_turn_followthrough_remaining_after{0};
+    bool used_post_turn_cruise_track{false};
+    bool used_armed_cruise_track{false};
+    bool post_turn_cruise_track_continue_needed{false};
+    bool heading_update_underreacted{false};
+    double horizontal_speed_mps{std::numeric_limits<double>::quiet_NaN()};
+    double vertical_speed_mps{std::numeric_limits<double>::quiet_NaN()};
+    double speed_mps{std::numeric_limits<double>::quiet_NaN()};
+    double gyro_deg_s{std::numeric_limits<double>::quiet_NaN()};
+    double source_yaw_rate_deg_s{std::numeric_limits<double>::quiet_NaN()};
+    int heading_large_residual_skip_count{0};
+    int post_turn_blocked_count{0};
+    int armed_cruise_blocked_count{0};
   };
 
   struct PendingGnssDebugContext
@@ -3608,6 +3951,16 @@ private:
       !ctx.vertical_dominant_low_horizontal_motion;
     if (update_turning_history && ctx.turning_now) {
       last_turning_heading_time_sec_ = now_sec;
+      post_turn_cruise_track_continue_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+      post_turn_armed_cruise_track_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+      post_turn_armed_cruise_track_followthrough_until_sec_ =
+        std::numeric_limits<double>::quiet_NaN();
+      post_turn_armed_cruise_track_followthrough_remaining_ = 0;
+    } else if (!mavros_armed_) {
+      post_turn_armed_cruise_track_until_sec_ = std::numeric_limits<double>::quiet_NaN();
+      post_turn_armed_cruise_track_followthrough_until_sec_ =
+        std::numeric_limits<double>::quiet_NaN();
+      post_turn_armed_cruise_track_followthrough_remaining_ = 0;
     }
 
     ctx.recent_turning =
@@ -3623,7 +3976,6 @@ private:
       std::isfinite(post_turn_hold_end_time_sec_) &&
       heading_post_turn_reacquire_hold_sec_ > 0.0 &&
       now_sec <= post_turn_hold_end_time_sec_;
-    ctx.post_turn_context = ctx.recent_turning || ctx.post_turn_hold_active;
 
     ctx.armed_cruise_force_relock_gyro_ok =
       !std::isfinite(last_imu_gyro_norm_deg_s_) ||
@@ -3634,31 +3986,91 @@ private:
       heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s_ <= 0.0 ||
       std::abs(last_mavros_heading_rate_deg_s_) <=
         heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s_;
-    // manual33 showed that reusing the strict underreaction gyro/source-rate
-    // gate for all post-turn tracking removes the low-speed/high-vertical
-    // tail, but also blocks legitimate higher-rate post-turn convergence.
-    ctx.post_turn_track_motion_ok =
-      ctx.post_turn_context &&
+    const bool post_turn_track_base_motion_ok =
       ctx.have_fresh_mavros_speed &&
       last_mavros_horizontal_speed_mps_ >= std::max(0.0, heading_update_low_speed_thresh_mps_) &&
       (heading_armed_cruise_force_relock_max_vertical_speed_mps_ <= 0.0 ||
        last_mavros_vertical_speed_mps_ <=
          heading_armed_cruise_force_relock_max_vertical_speed_mps_);
+    const bool post_turn_cruise_track_gyro_ok =
+      !std::isfinite(last_imu_gyro_norm_deg_s_) ||
+      heading_post_turn_cruise_track_max_gyro_deg_s_ <= 0.0 ||
+      last_imu_gyro_norm_deg_s_ <= heading_post_turn_cruise_track_max_gyro_deg_s_;
+    const bool post_turn_cruise_track_speed_ok =
+      heading_post_turn_cruise_track_min_horizontal_speed_mps_ <= 0.0 ||
+      last_mavros_horizontal_speed_mps_ >=
+        heading_post_turn_cruise_track_min_horizontal_speed_mps_;
+    const bool post_turn_low_hspeed_cluster_speed_ok =
+      (heading_post_turn_low_hspeed_cluster_min_horizontal_speed_mps_ <= 0.0 ||
+       last_mavros_horizontal_speed_mps_ >=
+         heading_post_turn_low_hspeed_cluster_min_horizontal_speed_mps_) &&
+      (heading_post_turn_low_hspeed_cluster_max_horizontal_speed_mps_ <= 0.0 ||
+       last_mavros_horizontal_speed_mps_ <=
+         heading_post_turn_low_hspeed_cluster_max_horizontal_speed_mps_);
+    const bool post_turn_low_hspeed_cluster_vertical_ok =
+      heading_post_turn_low_hspeed_cluster_max_vertical_speed_mps_ <= 0.0 ||
+      std::abs(last_mavros_vertical_speed_mps_) <=
+        heading_post_turn_low_hspeed_cluster_max_vertical_speed_mps_;
+    const bool post_turn_low_hspeed_cluster_gyro_ok =
+      !std::isfinite(last_imu_gyro_norm_deg_s_) ||
+      heading_post_turn_low_hspeed_cluster_max_gyro_deg_s_ <= 0.0 ||
+      last_imu_gyro_norm_deg_s_ <= heading_post_turn_low_hspeed_cluster_max_gyro_deg_s_;
+    const bool post_turn_low_hspeed_cluster_source_rate_ok =
+      !std::isfinite(last_mavros_heading_rate_deg_s_) ||
+      heading_post_turn_low_hspeed_cluster_max_source_yaw_rate_deg_s_ <= 0.0 ||
+      std::abs(last_mavros_heading_rate_deg_s_) <=
+        heading_post_turn_low_hspeed_cluster_max_source_yaw_rate_deg_s_;
+    // manual43 baseline keeps continuation on the stricter armed-cruise gyro
+    // gate so that the short continuation window does not leak into broader
+    // cruise-like drift.
+    ctx.post_turn_cruise_track_continue_active =
+      heading_post_turn_reacquire_enable_ &&
+      mavros_armed_ &&
+      !ctx.turning_now &&
+      !ctx.recent_turning &&
+      std::isfinite(post_turn_cruise_track_continue_until_sec_) &&
+      heading_post_turn_cruise_track_continue_sec_ > 0.0 &&
+      now_sec <= post_turn_cruise_track_continue_until_sec_ &&
+      post_turn_track_base_motion_ok &&
+      (heading_armed_cruise_force_relock_min_horizontal_speed_mps_ <= 0.0 ||
+       last_mavros_horizontal_speed_mps_ >=
+         heading_armed_cruise_force_relock_min_horizontal_speed_mps_) &&
+      ctx.armed_cruise_force_relock_gyro_ok &&
+      ctx.armed_cruise_force_relock_source_rate_ok;
+    ctx.post_turn_context =
+      ctx.recent_turning ||
+      ctx.post_turn_hold_active;
+    // manual33 showed that reusing the strict underreaction gyro/source-rate
+    // gate for all post-turn tracking removes the low-speed/high-vertical
+    // tail, but also blocks legitimate higher-rate post-turn convergence.
+    ctx.post_turn_track_motion_ok =
+      (ctx.post_turn_context ||
+       ctx.post_turn_cruise_track_continue_active) &&
+      post_turn_track_base_motion_ok;
+    ctx.post_turn_low_hspeed_cluster_ok =
+      heading_post_turn_low_hspeed_cluster_enable_ &&
+      mavros_armed_ &&
+      ctx.recent_turning &&
+      ctx.post_turn_track_motion_ok &&
+      post_turn_low_hspeed_cluster_speed_ok &&
+      post_turn_low_hspeed_cluster_vertical_ok &&
+      post_turn_low_hspeed_cluster_gyro_ok &&
+      post_turn_low_hspeed_cluster_source_rate_ok;
     ctx.post_turn_underreaction_motion_ok =
       ctx.recent_turning &&
       ctx.post_turn_track_motion_ok &&
       ctx.armed_cruise_force_relock_gyro_ok &&
       ctx.armed_cruise_force_relock_source_rate_ok;
+    // manual42 narrowed the remaining post-turn issue to high-speed windows
+    // whose gyro is slightly above the stricter 2 deg/s armed-cruise relock
+    // gate. Keep the tighter underreaction gate, but let cruise-track stay
+    // active longer in those otherwise stable post-turn convergence samples.
     ctx.post_turn_cruise_motion_ok =
-      ctx.recent_turning &&
+      (ctx.recent_turning ||
+       ctx.post_turn_cruise_track_continue_active) &&
       ctx.post_turn_track_motion_ok &&
-      (heading_armed_cruise_force_relock_min_horizontal_speed_mps_ <= 0.0 ||
-       last_mavros_horizontal_speed_mps_ >=
-         heading_armed_cruise_force_relock_min_horizontal_speed_mps_) &&
-      (heading_armed_cruise_force_relock_max_vertical_speed_mps_ <= 0.0 ||
-       last_mavros_vertical_speed_mps_ <=
-         heading_armed_cruise_force_relock_max_vertical_speed_mps_) &&
-      ctx.armed_cruise_force_relock_gyro_ok &&
+      (post_turn_cruise_track_speed_ok || ctx.post_turn_low_hspeed_cluster_ok) &&
+      post_turn_cruise_track_gyro_ok &&
       ctx.armed_cruise_force_relock_source_rate_ok;
 
     ctx.armed_cruise_force_relock_context =
@@ -3697,6 +4109,254 @@ private:
         return "mid_imu";
       default:
         return "unknown";
+    }
+  }
+
+  void openHeadingUpdateDebugCsv_()
+  {
+    if (heading_update_debug_csv_path_.empty()) {
+      return;
+    }
+
+    try {
+      const std::filesystem::path csv_path(heading_update_debug_csv_path_);
+      if (csv_path.has_parent_path()) {
+        std::filesystem::create_directories(csv_path.parent_path());
+      }
+      heading_update_debug_csv_.open(csv_path, std::ios::out | std::ios::trunc);
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Failed to open heading update debug CSV %s: %s",
+        heading_update_debug_csv_path_.c_str(),
+        e.what());
+      return;
+    }
+
+    if (!heading_update_debug_csv_.is_open()) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Failed to open heading update debug CSV %s",
+        heading_update_debug_csv_path_.c_str());
+      return;
+    }
+
+    heading_update_debug_csv_
+      << "sequence,event_type,heading_mode,ros_time_sec,update_time_sec,"
+      << "residual_before_deg,residual_after_deg,core_yaw_before_deg,core_yaw_after_deg,"
+      << "raw_heading_deg,measurement_heading_deg,measurement_std_deg,innovation_gate_deg,"
+      << "yaw_correction_abs_deg,"
+      << "armed,turning_now,recent_turning,post_turn_hold_active,post_turn_context,"
+      << "post_turn_track_motion_ok,post_turn_cruise_motion_ok,post_turn_low_hspeed_cluster_ok,"
+      << "post_turn_cruise_track_continue_active,"
+      << "armed_cruise_context,armed_cruise_gyro_ok,armed_cruise_source_rate_ok,"
+      << "post_turn_armed_cruise_track_motion_ok,"
+      << "post_turn_window_active_before,post_turn_followthrough_active_before,post_turn_context_active_before,"
+      << "post_turn_window_active_after,post_turn_followthrough_active_after,post_turn_context_active_after,"
+      << "post_turn_window_until_before_sec,post_turn_followthrough_until_before_sec,"
+      << "post_turn_followthrough_remaining_before,"
+      << "post_turn_window_until_after_sec,post_turn_followthrough_until_after_sec,"
+      << "post_turn_followthrough_remaining_after,"
+      << "used_post_turn_cruise_track,used_armed_cruise_track,post_turn_cruise_track_continue_needed,"
+      << "heading_update_underreacted,"
+      << "horizontal_speed_mps,vertical_speed_mps,speed_mps,gyro_deg_s,source_yaw_rate_deg_s,"
+      << "heading_large_residual_skip_count,post_turn_blocked_count,armed_cruise_blocked_count\n";
+    heading_update_debug_csv_.flush();
+    heading_update_debug_rows_since_flush_ = 0;
+
+    RCLCPP_INFO(
+      get_logger(),
+      "Heading update debug CSV enabled: %s",
+      heading_update_debug_csv_path_.c_str());
+  }
+
+  void logHeadingUpdateDebug_(const HeadingUpdateDebugEvent & event)
+  {
+    if (!heading_update_debug_csv_.is_open()) {
+      return;
+    }
+
+    heading_update_debug_csv_
+      << (++heading_update_debug_sequence_) << ','
+      << event.event_type << ','
+      << event.heading_mode << ','
+      << event.ros_time_sec << ','
+      << event.update_time_sec << ','
+      << event.residual_before_deg << ','
+      << event.residual_after_deg << ','
+      << event.core_yaw_before_deg << ','
+      << event.core_yaw_after_deg << ','
+      << event.raw_heading_deg << ','
+      << event.measurement_heading_deg << ','
+      << event.measurement_std_deg << ','
+      << event.innovation_gate_deg << ','
+      << event.yaw_correction_abs_deg << ','
+      << (event.armed ? 1 : 0) << ','
+      << (event.turning_now ? 1 : 0) << ','
+      << (event.recent_turning ? 1 : 0) << ','
+      << (event.post_turn_hold_active ? 1 : 0) << ','
+      << (event.post_turn_context ? 1 : 0) << ','
+      << (event.post_turn_track_motion_ok ? 1 : 0) << ','
+      << (event.post_turn_cruise_motion_ok ? 1 : 0) << ','
+      << (event.post_turn_low_hspeed_cluster_ok ? 1 : 0) << ','
+      << (event.post_turn_cruise_track_continue_active ? 1 : 0) << ','
+      << (event.armed_cruise_context ? 1 : 0) << ','
+      << (event.armed_cruise_gyro_ok ? 1 : 0) << ','
+      << (event.armed_cruise_source_rate_ok ? 1 : 0) << ','
+      << (event.post_turn_armed_cruise_track_motion_ok ? 1 : 0) << ','
+      << (event.post_turn_window_active_before ? 1 : 0) << ','
+      << (event.post_turn_followthrough_active_before ? 1 : 0) << ','
+      << (event.post_turn_context_active_before ? 1 : 0) << ','
+      << (event.post_turn_window_active_after ? 1 : 0) << ','
+      << (event.post_turn_followthrough_active_after ? 1 : 0) << ','
+      << (event.post_turn_context_active_after ? 1 : 0) << ','
+      << event.post_turn_window_until_before_sec << ','
+      << event.post_turn_followthrough_until_before_sec << ','
+      << event.post_turn_followthrough_remaining_before << ','
+      << event.post_turn_window_until_after_sec << ','
+      << event.post_turn_followthrough_until_after_sec << ','
+      << event.post_turn_followthrough_remaining_after << ','
+      << (event.used_post_turn_cruise_track ? 1 : 0) << ','
+      << (event.used_armed_cruise_track ? 1 : 0) << ','
+      << (event.post_turn_cruise_track_continue_needed ? 1 : 0) << ','
+      << (event.heading_update_underreacted ? 1 : 0) << ','
+      << event.horizontal_speed_mps << ','
+      << event.vertical_speed_mps << ','
+      << event.speed_mps << ','
+      << event.gyro_deg_s << ','
+      << event.source_yaw_rate_deg_s << ','
+      << event.heading_large_residual_skip_count << ','
+      << event.post_turn_blocked_count << ','
+      << event.armed_cruise_blocked_count << '\n';
+    ++heading_update_debug_rows_since_flush_;
+    if (heading_update_debug_rows_since_flush_ >= heading_update_debug_flush_interval_) {
+      heading_update_debug_csv_.flush();
+      heading_update_debug_rows_since_flush_ = 0;
+    }
+  }
+
+  void openStatePublishDebugCsv_()
+  {
+    if (state_publish_debug_csv_path_.empty()) {
+      return;
+    }
+
+    try {
+      const std::filesystem::path csv_path(state_publish_debug_csv_path_);
+      if (csv_path.has_parent_path()) {
+        std::filesystem::create_directories(csv_path.parent_path());
+      }
+      state_publish_debug_csv_.open(csv_path, std::ios::out | std::ios::trunc);
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Failed to open state publish debug CSV %s: %s",
+        state_publish_debug_csv_path_.c_str(),
+        e.what());
+      return;
+    }
+
+    if (!state_publish_debug_csv_.is_open()) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Failed to open state publish debug CSV %s",
+        state_publish_debug_csv_path_.c_str());
+      return;
+    }
+
+    state_publish_debug_csv_
+      << "sequence,ros_time_sec,odom_stamp_sec,last_core_time_sec,last_gnss_update_time_sec,"
+      << "last_gnss_source_time_sec,last_gnss_rx_ros_time_sec,"
+      << "core_time_minus_ros_sec,gnss_update_time_minus_ros_sec,gnss_source_time_minus_ros_sec,"
+      << "mavros_armed,core_initialized,odom_uses_gnss_pose,have_core_enu,have_gnss_enu,"
+      << "published_enu_e_m,published_enu_n_m,published_enu_u_m,"
+      << "core_enu_e_m,core_enu_n_m,core_enu_u_m,"
+      << "gnss_enu_e_m,gnss_enu_n_m,gnss_enu_u_m,"
+      << "core_minus_gnss_e_m,core_minus_gnss_n_m,core_minus_gnss_u_m,"
+      << "core_gnss_diff_h_m,core_gnss_diff_3d_m,"
+      << "core_velocity_vN_mps,core_velocity_vE_mps,core_velocity_vD_mps,core_velocity_vU_mps,"
+      << "mavros_horizontal_speed_mps,mavros_vertical_speed_mps\n";
+    state_publish_debug_csv_.flush();
+    state_publish_debug_rows_since_flush_ = 0;
+
+    RCLCPP_INFO(
+      get_logger(),
+      "State publish debug CSV enabled: %s",
+      state_publish_debug_csv_path_.c_str());
+  }
+
+  void logStatePublishDebug_(
+    const rclcpp::Time & stamp,
+    bool odom_uses_gnss_pose,
+    bool have_core_enu,
+    const Eigen::Vector3d & enu_core,
+    const Eigen::Vector3d & enu_published,
+    bool have_gnss_enu,
+    const Eigen::Vector3d & enu_gnss,
+    double core_vN_mps,
+    double core_vE_mps,
+    double core_vD_mps)
+  {
+    if (!state_publish_debug_csv_.is_open()) {
+      return;
+    }
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double stamp_sec = stamp.seconds();
+    const bool have_core_time = std::isfinite(last_core_time_);
+    const bool have_gnss_update_time = std::isfinite(last_gnss_time_sec_);
+    const bool have_gnss_source_time = std::isfinite(last_gnss_source_time_sec_);
+    const bool have_diff = have_core_enu && have_gnss_enu;
+    Eigen::Vector3d diff = Eigen::Vector3d::Zero();
+    if (have_diff) {
+      diff = enu_core - enu_gnss;
+    }
+    const double diff_h_m = have_diff ? std::hypot(diff.x(), diff.y()) : nan;
+    const double diff_3d_m = have_diff ? diff.norm() : nan;
+    auto value_if = [nan](bool ok, double value) {
+      return ok ? value : nan;
+    };
+
+    state_publish_debug_csv_
+      << (++state_publish_debug_sequence_) << ','
+      << now().seconds() << ','
+      << stamp_sec << ','
+      << value_if(have_core_time, last_core_time_) << ','
+      << value_if(have_gnss_update_time, last_gnss_time_sec_) << ','
+      << value_if(have_gnss_source_time, last_gnss_source_time_sec_) << ','
+      << last_gnss_rx_ros_time_sec_ << ','
+      << value_if(have_core_time, last_core_time_ - stamp_sec) << ','
+      << value_if(have_gnss_update_time, last_gnss_time_sec_ - stamp_sec) << ','
+      << value_if(have_gnss_source_time, last_gnss_source_time_sec_ - stamp_sec) << ','
+      << (mavros_armed_ ? 1 : 0) << ','
+      << (core_initialized_ ? 1 : 0) << ','
+      << (odom_uses_gnss_pose ? 1 : 0) << ','
+      << (have_core_enu ? 1 : 0) << ','
+      << (have_gnss_enu ? 1 : 0) << ','
+      << enu_published.x() << ','
+      << enu_published.y() << ','
+      << enu_published.z() << ','
+      << value_if(have_core_enu, enu_core.x()) << ','
+      << value_if(have_core_enu, enu_core.y()) << ','
+      << value_if(have_core_enu, enu_core.z()) << ','
+      << value_if(have_gnss_enu, enu_gnss.x()) << ','
+      << value_if(have_gnss_enu, enu_gnss.y()) << ','
+      << value_if(have_gnss_enu, enu_gnss.z()) << ','
+      << value_if(have_diff, diff.x()) << ','
+      << value_if(have_diff, diff.y()) << ','
+      << value_if(have_diff, diff.z()) << ','
+      << diff_h_m << ','
+      << diff_3d_m << ','
+      << core_vN_mps << ','
+      << core_vE_mps << ','
+      << core_vD_mps << ','
+      << -core_vD_mps << ','
+      << last_mavros_horizontal_speed_mps_ << ','
+      << last_mavros_vertical_speed_mps_ << '\n';
+    ++state_publish_debug_rows_since_flush_;
+    if (state_publish_debug_rows_since_flush_ >= state_publish_debug_flush_interval_) {
+      state_publish_debug_csv_.flush();
+      state_publish_debug_rows_since_flush_ = 0;
     }
   }
 
@@ -4033,9 +4693,17 @@ private:
   double last_native_sensor_gps_velocity_rx_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   PendingGnssDebugContext pending_gnss_debug_context_{};
   std::ofstream gnss_update_debug_csv_;
+  std::ofstream heading_update_debug_csv_;
+  std::ofstream state_publish_debug_csv_;
   std::uint64_t last_logged_observation_debug_sequence_{0};
+  std::uint64_t heading_update_debug_sequence_{0};
+  std::uint64_t state_publish_debug_sequence_{0};
   std::size_t gnss_update_debug_rows_since_flush_{0};
   std::size_t gnss_update_debug_flush_interval_{20};
+  std::size_t heading_update_debug_rows_since_flush_{0};
+  std::size_t heading_update_debug_flush_interval_{1};
+  std::size_t state_publish_debug_rows_since_flush_{0};
+  std::size_t state_publish_debug_flush_interval_{50};
 
   // 零速度更新 (ZUPT) - 无人机未启动时
   bool use_zero_velocity_update_when_disarmed_{true};
@@ -4085,6 +4753,8 @@ private:
   double armed_cruise_vertical_cov_reopen_until_sec_{std::numeric_limits<double>::quiet_NaN()};
   double post_flight_vertical_cov_reopen_until_sec_{std::numeric_limits<double>::quiet_NaN()};
   std::string gnss_update_debug_csv_path_;
+  std::string heading_update_debug_csv_path_;
+  std::string state_publish_debug_csv_path_;
   bool use_online_reset_covariance_{true};
   double reset_pos_std_m_{5.0};
   double reset_vel_std_mps_{5.0};
@@ -4106,10 +4776,20 @@ private:
   double heading_post_turn_reacquire_max_residual_deg_{45.0};
   double heading_post_turn_reacquire_std_deg_{2.0};
   double heading_post_turn_cruise_track_std_deg_{2.0};
+  double heading_post_turn_cruise_track_max_gyro_deg_s_{3.5};
+  double heading_post_turn_cruise_track_min_horizontal_speed_mps_{4.0};
+  bool heading_post_turn_low_hspeed_cluster_enable_{false};
+  double heading_post_turn_low_hspeed_cluster_min_horizontal_speed_mps_{4.3};
+  double heading_post_turn_low_hspeed_cluster_max_horizontal_speed_mps_{4.6};
+  double heading_post_turn_low_hspeed_cluster_max_vertical_speed_mps_{0.2};
+  double heading_post_turn_low_hspeed_cluster_max_gyro_deg_s_{2.0};
+  double heading_post_turn_low_hspeed_cluster_max_source_yaw_rate_deg_s_{0.5};
   double heading_post_turn_reacquire_hold_sec_{4.0};
   double heading_post_turn_reacquire_max_rate_hz_{5.0};
   bool heading_post_turn_force_relock_enable_{true};
   double heading_post_turn_force_relock_min_residual_deg_{20.0};
+  double heading_post_turn_cruise_track_continue_sec_{1.5};
+  double heading_post_turn_cruise_track_continue_min_residual_deg_{0.8};
   int heading_post_turn_force_relock_min_consecutive_blocks_{3};
   double heading_post_turn_force_relock_yaw_std_deg_{5.0};
   double heading_post_turn_force_relock_max_rate_hz_{1.0};
@@ -4117,6 +4797,11 @@ private:
   double heading_post_turn_hold_force_relock_min_residual_deg_{13.0};
   int heading_post_turn_hold_force_relock_min_consecutive_blocks_{20};
   bool heading_armed_cruise_force_relock_enable_{true};
+  double heading_armed_cruise_track_min_residual_deg_{0.9};
+  double heading_post_turn_armed_cruise_track_window_sec_{0.0};
+  double heading_post_turn_armed_cruise_track_min_residual_deg_{0.9};
+  double heading_post_turn_armed_cruise_track_min_horizontal_speed_mps_{4.0};
+  double heading_post_turn_armed_cruise_track_followthrough_sec_{0.0};
   double heading_armed_cruise_force_relock_min_residual_deg_{13.0};
   int heading_armed_cruise_force_relock_min_consecutive_blocks_{30};
   double heading_armed_cruise_force_relock_min_horizontal_speed_mps_{4.0};
@@ -4196,6 +4881,11 @@ private:
   double last_post_turn_reacquire_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_post_turn_reacquire_apply_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double post_turn_hold_end_time_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double post_turn_cruise_track_continue_until_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double post_turn_armed_cruise_track_until_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double post_turn_armed_cruise_track_followthrough_until_sec_{
+    std::numeric_limits<double>::quiet_NaN()};
+  int post_turn_armed_cruise_track_followthrough_remaining_{0};
   double last_post_turn_force_relock_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_armed_cruise_force_relock_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_heading_underreaction_force_relock_time_sec_{std::numeric_limits<double>::quiet_NaN()};
@@ -4286,6 +4976,8 @@ private:
   bool core_initialized_{false};
   double last_core_time_{-std::numeric_limits<double>::infinity()};
   double last_gnss_time_sec_{-std::numeric_limits<double>::infinity()};
+  double last_gnss_source_time_sec_{std::numeric_limits<double>::quiet_NaN()};
+  double last_gnss_rx_ros_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   bool auto_reset_on_invalid_state_{true};
   double invalid_state_reset_cooldown_sec_{5.0};
   double last_invalid_reset_time_sec_{std::numeric_limits<double>::quiet_NaN()};
