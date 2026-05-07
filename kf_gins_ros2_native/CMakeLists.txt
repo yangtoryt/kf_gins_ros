@@ -73,6 +73,7 @@ install(PROGRAMS
   scripts/px4_aux_state_relay.py
   scripts/sync_messages.py
   scripts/real_time_comparison.py
+  scripts/ekf_iekf_pair_logger.py
   scripts/offline_analysis.py
   # 若需要用 launch 起 hover_move，也一起装：
   # scripts/hover_move.py

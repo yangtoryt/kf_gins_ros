@@ -2,7 +2,10 @@
   ros__parameters:
     plugin_allowlist:
       - command
+      - gps_input
+      - hil
       - imu
       - local_position
+      - param
       - sys_status
       - waypoint

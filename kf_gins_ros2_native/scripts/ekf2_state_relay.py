@@ -117,6 +117,7 @@ class EKF2StateRelay(Node):
             f"EKF2StateRelay 已启动\n"
             f"  输入模式: {self.input_mode}\n"
             f"  输入: {self.input_topic if self.input_mode == 'mavros_pose' else self.vehicle_odometry_topic}\n"
+            f"  使用输入时间戳: {self.use_input_stamp}\n"
             f"  速度: {self.velocity_topic if self.input_mode == 'mavros_pose' else 'embedded in vehicle_odometry'}\n"
             f"  输出 pose: {self.output_topic if self.publish_pose else '(disabled)'}\n"
             f"  输出 odom: {self.output_odom_topic}"

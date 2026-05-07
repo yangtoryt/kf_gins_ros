@@ -4,6 +4,7 @@ from launch.conditions import IfCondition
 from launch.conditions import UnlessCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, EnvironmentVariable, TextSubstitution, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 import os
 from datetime import datetime
@@ -66,8 +67,8 @@ def generate_launch_description():
     )
     
     enable_real_time_comparison = DeclareLaunchArgument(
-        'enable_real_time_comparison', default_value='true',
-        description='Enable real-time comparison node'
+        'enable_real_time_comparison', default_value='false',
+        description='Enable real-time comparison node; disabled by default for flight stability'
     )
 
     publish_ekf2_state = DeclareLaunchArgument(
@@ -99,8 +100,16 @@ def generate_launch_description():
         description='How often real_time_comparison prints metric summaries to its log'
     )
     iekf_raw_topic = DeclareLaunchArgument(
-        'iekf_raw_topic', default_value='/kf_gins/odom_raw',
-        description='Optional raw IEKF odom topic for diagnostics'
+        'iekf_raw_topic', default_value='__disabled__',
+        description='Optional raw IEKF odom topic for diagnostics; disabled by default for flight stability'
+    )
+    comparison_compute_raw_metrics = DeclareLaunchArgument(
+        'comparison_compute_raw_metrics', default_value='false',
+        description='Compute raw IEKF pairing and raw error metrics inside real_time_comparison; opt-in for raw diagnostics'
+    )
+    comparison_raw_callback_mode = DeclareLaunchArgument(
+        'comparison_raw_callback_mode', default_value='store',
+        description='Raw IEKF callback mode: store, count_only, or drop'
     )
     iekf_fallback_topic = DeclareLaunchArgument(
         'iekf_fallback_topic', default_value='/kf_gins/fallback_active',
@@ -115,6 +124,14 @@ def generate_launch_description():
         'gnss_update_debug_csv_path', default_value='',
         description='Optional CSV output written by kf_gins_node for applied GNSS update diagnostics'
     )
+    gnss_nis_debug_csv_path = DeclareLaunchArgument(
+        'gnss_nis_debug_csv_path', default_value='',
+        description='Optional low-rate CSV output written by kf_gins_node for GNSS S/NIS/acceptance diagnostics'
+    )
+    gnss_nis_debug_max_rate_hz = DeclareLaunchArgument(
+        'gnss_nis_debug_max_rate_hz', default_value='2.0',
+        description='Maximum GNSS NIS debug CSV write rate in Hz; 0 logs every GNSS position update'
+    )
     heading_update_debug_csv_path = DeclareLaunchArgument(
         'heading_update_debug_csv_path', default_value='',
         description='Optional CSV output written by kf_gins_node for every heading update/relock event'
@@ -122,6 +139,34 @@ def generate_launch_description():
     state_publish_debug_csv_path = DeclareLaunchArgument(
         'state_publish_debug_csv_path', default_value='',
         description='Optional CSV output written by kf_gins_node for every state publish'
+    )
+    raw_odom_decimation = DeclareLaunchArgument(
+        'raw_odom_decimation', default_value='50',
+        description='Publish every Nth /kf_gins/odom_raw sample from kf_gins_node'
+    )
+    path_publish_rate_hz = DeclareLaunchArgument(
+        'path_publish_rate_hz', default_value='5.0',
+        description='Timer publish rate for /kf_gins/path; set 0.0 to disable the timer'
+    )
+    pose_decimation = DeclareLaunchArgument(
+        'pose_decimation', default_value='5',
+        description='Append/publish every Nth pose sample into /kf_gins/path'
+    )
+    max_path_points = DeclareLaunchArgument(
+        'max_path_points', default_value='20000',
+        description='Maximum number of poses retained in /kf_gins/path'
+    )
+    core_processing_enable = DeclareLaunchArgument(
+        'core_processing_enable', default_value='true',
+        description='Enable kf_gins_node core IMU/GNSS processing; false keeps subscriptions active but skips filter updates'
+    )
+    core_imu_decimation = DeclareLaunchArgument(
+        'core_imu_decimation', default_value='1',
+        description='Process every Nth IMU sample in the KF-GINS core; skipped samples are accumulated before propagation'
+    )
+    core_max_imu_rate_hz = DeclareLaunchArgument(
+        'core_max_imu_rate_hz', default_value='0.0',
+        description='Maximum KF-GINS core IMU propagation rate; 0 disables rate limiting'
     )
     armed_cruise_native_gnss_vel_override_enable = DeclareLaunchArgument(
         'armed_cruise_native_gnss_vel_override_enable', default_value='true',
@@ -235,6 +280,78 @@ def generate_launch_description():
         'post_flight_vertical_cov_reopen_accbias_std_z_mps2', default_value='0.05',
         description='Vertical accelerometer bias std floor while the post-flight covariance reopen is active'
     )
+    terminal_descent_observation_enable = DeclareLaunchArgument(
+        'terminal_descent_observation_enable', default_value='false',
+        description='Enable narrow observation tightening in armed RTL/landing terminal descent'
+    )
+    terminal_descent_require_rtl_mode = DeclareLaunchArgument(
+        'terminal_descent_require_rtl_mode', default_value='true',
+        description='Require MAVROS mode to contain RTL or LAND before terminal descent tightening can activate'
+    )
+    terminal_descent_max_horizontal_speed_mps = DeclareLaunchArgument(
+        'terminal_descent_max_horizontal_speed_mps', default_value='1.6',
+        description='Maximum horizontal speed for terminal descent tightening'
+    )
+    terminal_descent_min_vertical_speed_mps = DeclareLaunchArgument(
+        'terminal_descent_min_vertical_speed_mps', default_value='0.30',
+        description='Minimum absolute vertical speed for terminal descent tightening'
+    )
+    terminal_descent_max_gyro_deg_s = DeclareLaunchArgument(
+        'terminal_descent_max_gyro_deg_s', default_value='30.0',
+        description='Maximum IMU gyro norm for terminal descent tightening; <=0 disables this gate'
+    )
+    terminal_descent_max_source_yaw_rate_deg_s = DeclareLaunchArgument(
+        'terminal_descent_max_source_yaw_rate_deg_s', default_value='30.0',
+        description='Maximum source yaw rate for terminal descent tightening; <=0 disables this gate'
+    )
+    terminal_descent_min_armed_time_sec = DeclareLaunchArgument(
+        'terminal_descent_min_armed_time_sec', default_value='0.0',
+        description='Minimum armed duration before terminal descent tightening can activate'
+    )
+    terminal_descent_native_gnss_vel_override_enable = DeclareLaunchArgument(
+        'terminal_descent_native_gnss_vel_override_enable', default_value='true',
+        description='Tighten native GNSS velocity std during terminal descent context'
+    )
+    terminal_descent_native_gnss_vel_std_h_mps = DeclareLaunchArgument(
+        'terminal_descent_native_gnss_vel_std_h_mps', default_value='0.03',
+        description='Horizontal native GNSS velocity std used in terminal descent context'
+    )
+    terminal_descent_native_gnss_vel_std_u_mps = DeclareLaunchArgument(
+        'terminal_descent_native_gnss_vel_std_u_mps', default_value='0.05',
+        description='Vertical native GNSS velocity std used in terminal descent context'
+    )
+    terminal_descent_vertical_cov_reopen_enable = DeclareLaunchArgument(
+        'terminal_descent_vertical_cov_reopen_enable', default_value='true',
+        description='Reopen vertical covariance while terminal descent context is active'
+    )
+    terminal_descent_vertical_cov_reopen_pos_std_m = DeclareLaunchArgument(
+        'terminal_descent_vertical_cov_reopen_pos_std_m', default_value='0.15',
+        description='Vertical position std floor while terminal descent covariance reopen is active'
+    )
+    terminal_descent_vertical_cov_reopen_vel_std_mps = DeclareLaunchArgument(
+        'terminal_descent_vertical_cov_reopen_vel_std_mps', default_value='0.05',
+        description='Vertical velocity std floor while terminal descent covariance reopen is active'
+    )
+    terminal_descent_vertical_cov_reopen_accbias_std_z_mps2 = DeclareLaunchArgument(
+        'terminal_descent_vertical_cov_reopen_accbias_std_z_mps2', default_value='0.05',
+        description='Vertical accelerometer bias std floor while terminal descent covariance reopen is active'
+    )
+    terminal_descent_horizontal_zero_vel_enable = DeclareLaunchArgument(
+        'terminal_descent_horizontal_zero_vel_enable', default_value='false',
+        description='Inject a horizontal zero-velocity observation in low-horizontal-speed terminal descent'
+    )
+    terminal_descent_horizontal_zero_vel_max_hspeed_mps = DeclareLaunchArgument(
+        'terminal_descent_horizontal_zero_vel_max_hspeed_mps', default_value='0.30',
+        description='Maximum horizontal speed for terminal descent horizontal zero-velocity observation'
+    )
+    terminal_descent_horizontal_zero_vel_std_h_mps = DeclareLaunchArgument(
+        'terminal_descent_horizontal_zero_vel_std_h_mps', default_value='0.05',
+        description='Horizontal velocity std for terminal descent horizontal zero-velocity observation'
+    )
+    terminal_descent_horizontal_zero_vel_std_u_mps = DeclareLaunchArgument(
+        'terminal_descent_horizontal_zero_vel_std_u_mps', default_value='10.0',
+        description='Vertical velocity std for terminal descent horizontal zero-velocity observation'
+    )
     tilt_force_relock_min_residual_deg = DeclareLaunchArgument(
         'tilt_force_relock_min_residual_deg', default_value='2.0',
         description='Minimum roll/pitch residual for tilt force relock'
@@ -256,8 +373,8 @@ def generate_launch_description():
         description='Publish raw IEKF on /iekf/state_aligned before alignment is ready'
     )
     ekf2_use_input_stamp = DeclareLaunchArgument(
-        'ekf2_use_input_stamp', default_value='false',
-        description='Use MAVROS stamp for EKF2 relay (false uses node time for sync)'
+        'ekf2_use_input_stamp', default_value='true',
+        description='Use input stamp for EKF2 relay; false stamps relayed samples with node time'
     )
     ekf2_relay_publish_pose = DeclareLaunchArgument(
         'ekf2_relay_publish_pose', default_value='true',
@@ -308,7 +425,11 @@ def generate_launch_description():
     )
     gnss_relay_mode = DeclareLaunchArgument(
         'gnss_relay_mode', default_value='mavros',
-        description='GNSS relay source: mavros, px4_sensor_gps, or px4_vehicle_global_position'
+        description='GNSS relay source: mavros, px4_sensor_gps, px4_vehicle_global_position, or disabled'
+    )
+    enable_gnss_relay = DeclareLaunchArgument(
+        'enable_gnss_relay', default_value='true',
+        description='Enable GNSS relay nodes. False disables both mavros-source and PX4-source GNSS relays.'
     )
     gnss_source = DeclareLaunchArgument(
         'gnss_source', default_value='navsatfix',
@@ -382,6 +503,14 @@ def generate_launch_description():
         'gnss_relay_start_delay_sec', default_value='0.0',
         description='Delay GNSS relay startup so KF-GINS can receive heading before first GNSS reset'
     )
+    gnss_relay_publish_enable = DeclareLaunchArgument(
+        'gnss_relay_publish_enable', default_value='true',
+        description='Enable /gps/fix publishing in mavros-source gnss_relay.py; false keeps subscription-only'
+    )
+    gnss_relay_subscribe_enable = DeclareLaunchArgument(
+        'gnss_relay_subscribe_enable', default_value='true',
+        description='Enable MAVROS GNSS subscription in mavros-source gnss_relay.py; false keeps process-only'
+    )
 
     # ============ GNSS Dropzones (可选) ============
     # 用于模拟 GNSS 遮挡/丢星：当飞机进入配置的盒子区域时，将 /gps/fix 发布为 NO_FIX（或 stop/nan）
@@ -426,6 +555,26 @@ def generate_launch_description():
         description='Simulation GNSS vertical std (meters)'
     )
 
+    gnss_position_lag_compensation_enable = DeclareLaunchArgument(
+        'gnss_position_lag_compensation_enable', default_value='false',
+        description='Enable runtime GNSS position source-lag compensation'
+    )
+
+    gnss_position_lag_compensation_sec = DeclareLaunchArgument(
+        'gnss_position_lag_compensation_sec', default_value='0.25',
+        description='GNSS position source-lag compensation horizon (seconds)'
+    )
+
+    gnss_position_lag_compensation_max_sec = DeclareLaunchArgument(
+        'gnss_position_lag_compensation_max_sec', default_value='0.50',
+        description='Maximum allowed GNSS position source-lag compensation horizon (seconds)'
+    )
+
+    gnss_position_lag_compensation_min_speed_mps = DeclareLaunchArgument(
+        'gnss_position_lag_compensation_min_speed_mps', default_value='0.50',
+        description='Minimum native GNSS horizontal speed for source-lag compensation'
+    )
+
     aligned_path_require_armed = DeclareLaunchArgument(
         'aligned_path_require_armed', default_value='true',
         description='Require arming before publishing IEKF aligned path'
@@ -459,6 +608,10 @@ def generate_launch_description():
         'enable_iekf_aligned_path', default_value='true',
         description='Enable aligned IEKF path publisher'
     )
+    enable_static_tf = DeclareLaunchArgument(
+        'enable_static_tf', default_value='true',
+        description='Enable world->map static transform publisher'
+    )
 
     gps_dropzones_yaml = PathJoinSubstitution([
         FindPackageShare('kf_gins_ros2_native'),
@@ -472,7 +625,8 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='world_to_map_broadcaster',
         arguments=['0', '0', '0', '0', '0', '0', 'world', 'map'],
-        output='screen'
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('enable_static_tf')),
     )
 
     # ============ 数据预处理 ============
@@ -520,10 +674,14 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             'in_topic': LaunchConfiguration('mavros_gps_topic'),
-            'out_topic': '/gps/fix'
+            'out_topic': '/gps/fix',
+            'subscribe_enable': ParameterValue(LaunchConfiguration('gnss_relay_subscribe_enable'), value_type=bool),
+            'publish_enable': ParameterValue(LaunchConfiguration('gnss_relay_publish_enable'), value_type=bool),
         }],
         condition=IfCondition(PythonExpression([
             "'",
+            LaunchConfiguration('enable_gnss_relay'),
+            "' == 'true' and '",
             LaunchConfiguration('enable_gps_dropzones'),
             "' == 'false' and '",
             LaunchConfiguration('gnss_relay_mode'),
@@ -544,12 +702,16 @@ def generate_launch_description():
             ]),
             'sensor_gps_topic': LaunchConfiguration('px4_sensor_gps_topic'),
             'vehicle_global_position_topic': LaunchConfiguration('px4_vehicle_global_position_topic'),
-            'output_topic': '/gps/fix',
+            'output_topic': PythonExpression([
+                "'/gps/dropzone_input' if '",
+                LaunchConfiguration('enable_gps_dropzones'),
+                "' == 'true' else '/gps/fix'"
+            ]),
         }],
         condition=IfCondition(PythonExpression([
             "'",
-            LaunchConfiguration('enable_gps_dropzones'),
-            "' == 'false' and ('",
+            LaunchConfiguration('enable_gnss_relay'),
+            "' == 'true' and ('",
             LaunchConfiguration('gnss_relay_mode'),
             "' == 'px4_sensor_gps' or '",
             LaunchConfiguration('gnss_relay_mode'),
@@ -570,7 +732,13 @@ def generate_launch_description():
             gps_dropzones_yaml,
             {
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
-                'in_fix_topic': LaunchConfiguration('mavros_gps_topic'),
+                'in_fix_topic': PythonExpression([
+                    "'",
+                    LaunchConfiguration('mavros_gps_topic'),
+                    "' if '",
+                    LaunchConfiguration('gnss_relay_mode'),
+                    "' == 'mavros' else '/gps/dropzone_input'"
+                ]),
                 'pose_topic': LaunchConfiguration('mavros_local_pose_topic'),
                 'mavros_state_topic': LaunchConfiguration('mavros_state_topic'),
                 'out_fix_topic': '/gps/fix',
@@ -733,7 +901,7 @@ def generate_launch_description():
             'velocity_topic': LaunchConfiguration('mavros_local_velocity_topic'),
             'output_topic': '/ekf2/pose',
             'publish_pose': LaunchConfiguration('ekf2_relay_publish_pose'),
-            # 默认用 node time，确保与 IEKF 同一时间基准
+            # Preserve the source sample stamp so paired comparisons do not hide relay latency.
             'use_input_stamp': LaunchConfiguration('ekf2_use_input_stamp'),
             'use_covariance': False,
             'prefer_native_velocity': True,
@@ -771,9 +939,22 @@ def generate_launch_description():
                 'use_sim_gnss_std': LaunchConfiguration('use_sim_gnss_std'),
                 'sim_gnss_std_h_m': LaunchConfiguration('sim_gnss_std_h_m'),
                 'sim_gnss_std_u_m': LaunchConfiguration('sim_gnss_std_u_m'),
+                'gnss_position_lag_compensation_enable': LaunchConfiguration('gnss_position_lag_compensation_enable'),
+                'gnss_position_lag_compensation_sec': LaunchConfiguration('gnss_position_lag_compensation_sec'),
+                'gnss_position_lag_compensation_max_sec': LaunchConfiguration('gnss_position_lag_compensation_max_sec'),
+                'gnss_position_lag_compensation_min_speed_mps': LaunchConfiguration('gnss_position_lag_compensation_min_speed_mps'),
                 'gnss_update_debug_csv_path': LaunchConfiguration('gnss_update_debug_csv_path'),
+                'gnss_nis_debug_csv_path': LaunchConfiguration('gnss_nis_debug_csv_path'),
+                'gnss_nis_debug_max_rate_hz': ParameterValue(LaunchConfiguration('gnss_nis_debug_max_rate_hz'), value_type=float),
                 'heading_update_debug_csv_path': LaunchConfiguration('heading_update_debug_csv_path'),
                 'state_publish_debug_csv_path': LaunchConfiguration('state_publish_debug_csv_path'),
+                'raw_odom_decimation': ParameterValue(LaunchConfiguration('raw_odom_decimation'), value_type=int),
+                'path_publish_rate_hz': ParameterValue(LaunchConfiguration('path_publish_rate_hz'), value_type=float),
+                'pose_decimation': ParameterValue(LaunchConfiguration('pose_decimation'), value_type=int),
+                'max_path_points': ParameterValue(LaunchConfiguration('max_path_points'), value_type=int),
+                'core_processing_enable': ParameterValue(LaunchConfiguration('core_processing_enable'), value_type=bool),
+                'core_imu_decimation': ParameterValue(LaunchConfiguration('core_imu_decimation'), value_type=int),
+                'core_max_imu_rate_hz': ParameterValue(LaunchConfiguration('core_max_imu_rate_hz'), value_type=float),
                 'armed_cruise_native_gnss_vel_override_enable': LaunchConfiguration('armed_cruise_native_gnss_vel_override_enable'),
                 'armed_cruise_gnss_pos_override_enable': LaunchConfiguration('armed_cruise_gnss_pos_override_enable'),
                 'armed_cruise_gnss_pos_std_h_m': LaunchConfiguration('armed_cruise_gnss_pos_std_h_m'),
@@ -802,6 +983,24 @@ def generate_launch_description():
                 'post_flight_vertical_cov_reopen_pos_std_m': LaunchConfiguration('post_flight_vertical_cov_reopen_pos_std_m'),
                 'post_flight_vertical_cov_reopen_vel_std_mps': LaunchConfiguration('post_flight_vertical_cov_reopen_vel_std_mps'),
                 'post_flight_vertical_cov_reopen_accbias_std_z_mps2': LaunchConfiguration('post_flight_vertical_cov_reopen_accbias_std_z_mps2'),
+                'terminal_descent_observation_enable': ParameterValue(LaunchConfiguration('terminal_descent_observation_enable'), value_type=bool),
+                'terminal_descent_require_rtl_mode': ParameterValue(LaunchConfiguration('terminal_descent_require_rtl_mode'), value_type=bool),
+                'terminal_descent_max_horizontal_speed_mps': ParameterValue(LaunchConfiguration('terminal_descent_max_horizontal_speed_mps'), value_type=float),
+                'terminal_descent_min_vertical_speed_mps': ParameterValue(LaunchConfiguration('terminal_descent_min_vertical_speed_mps'), value_type=float),
+                'terminal_descent_max_gyro_deg_s': ParameterValue(LaunchConfiguration('terminal_descent_max_gyro_deg_s'), value_type=float),
+                'terminal_descent_max_source_yaw_rate_deg_s': ParameterValue(LaunchConfiguration('terminal_descent_max_source_yaw_rate_deg_s'), value_type=float),
+                'terminal_descent_min_armed_time_sec': ParameterValue(LaunchConfiguration('terminal_descent_min_armed_time_sec'), value_type=float),
+                'terminal_descent_native_gnss_vel_override_enable': ParameterValue(LaunchConfiguration('terminal_descent_native_gnss_vel_override_enable'), value_type=bool),
+                'terminal_descent_native_gnss_vel_std_h_mps': ParameterValue(LaunchConfiguration('terminal_descent_native_gnss_vel_std_h_mps'), value_type=float),
+                'terminal_descent_native_gnss_vel_std_u_mps': ParameterValue(LaunchConfiguration('terminal_descent_native_gnss_vel_std_u_mps'), value_type=float),
+                'terminal_descent_vertical_cov_reopen_enable': ParameterValue(LaunchConfiguration('terminal_descent_vertical_cov_reopen_enable'), value_type=bool),
+                'terminal_descent_vertical_cov_reopen_pos_std_m': ParameterValue(LaunchConfiguration('terminal_descent_vertical_cov_reopen_pos_std_m'), value_type=float),
+                'terminal_descent_vertical_cov_reopen_vel_std_mps': ParameterValue(LaunchConfiguration('terminal_descent_vertical_cov_reopen_vel_std_mps'), value_type=float),
+                'terminal_descent_vertical_cov_reopen_accbias_std_z_mps2': ParameterValue(LaunchConfiguration('terminal_descent_vertical_cov_reopen_accbias_std_z_mps2'), value_type=float),
+                'terminal_descent_horizontal_zero_vel_enable': ParameterValue(LaunchConfiguration('terminal_descent_horizontal_zero_vel_enable'), value_type=bool),
+                'terminal_descent_horizontal_zero_vel_max_hspeed_mps': ParameterValue(LaunchConfiguration('terminal_descent_horizontal_zero_vel_max_hspeed_mps'), value_type=float),
+                'terminal_descent_horizontal_zero_vel_std_h_mps': ParameterValue(LaunchConfiguration('terminal_descent_horizontal_zero_vel_std_h_mps'), value_type=float),
+                'terminal_descent_horizontal_zero_vel_std_u_mps': ParameterValue(LaunchConfiguration('terminal_descent_horizontal_zero_vel_std_u_mps'), value_type=float),
                 'tilt_force_relock_min_residual_deg': LaunchConfiguration('tilt_force_relock_min_residual_deg'),
                 'tilt_force_relock_roll_pitch_std_deg': LaunchConfiguration('tilt_force_relock_roll_pitch_std_deg'),
                 'tilt_force_relock_once_per_motion_context': LaunchConfiguration('tilt_force_relock_once_per_motion_context'),
@@ -839,6 +1038,8 @@ def generate_launch_description():
             'subscribe_ekf2_pose': LaunchConfiguration('comparison_subscribe_ekf2_pose'),
             'iekf_topic': '/kf_gins/odom',
             'iekf_raw_topic': LaunchConfiguration('iekf_raw_topic'),
+            'compute_raw_metrics': LaunchConfiguration('comparison_compute_raw_metrics'),
+            'raw_callback_mode': LaunchConfiguration('comparison_raw_callback_mode'),
             'iekf_fallback_topic': LaunchConfiguration('iekf_fallback_topic'),
             'comparison_output': '/comparison/metrics',
             'metrics_csv_path': LaunchConfiguration('comparison_csv_path'),
@@ -1035,11 +1236,22 @@ def generate_launch_description():
         comparison_metrics_publish_rate,
         comparison_metrics_log_period_sec,
         iekf_raw_topic,
+        comparison_compute_raw_metrics,
+        comparison_raw_callback_mode,
         iekf_fallback_topic,
         comparison_csv_path,
         gnss_update_debug_csv_path,
+        gnss_nis_debug_csv_path,
+        gnss_nis_debug_max_rate_hz,
         heading_update_debug_csv_path,
         state_publish_debug_csv_path,
+        raw_odom_decimation,
+        path_publish_rate_hz,
+        pose_decimation,
+        max_path_points,
+        core_processing_enable,
+        core_imu_decimation,
+        core_max_imu_rate_hz,
         armed_cruise_native_gnss_vel_override_enable,
         armed_cruise_gnss_pos_override_enable,
         armed_cruise_gnss_pos_std_h_m,
@@ -1085,6 +1297,7 @@ def generate_launch_description():
         comparison_subscribe_ekf2_pose,
         mavros_gps_topic,
         gnss_relay_mode,
+        enable_gnss_relay,
         gnss_source,
         px4_sensor_gps_topic,
         px4_vehicle_global_position_topic,
@@ -1103,6 +1316,8 @@ def generate_launch_description():
         px4_vehicle_attitude_topic,
         mavros_hil_gps_topic,
         gnss_relay_start_delay_sec,
+        gnss_relay_publish_enable,
+        gnss_relay_subscribe_enable,
         enable_gps_dropzones,
         inject_dropzone_gps_to_px4,
         px4_gps_injection_mode,
@@ -1112,6 +1327,28 @@ def generate_launch_description():
         use_sim_gnss_std,
         sim_gnss_std_h_m,
         sim_gnss_std_u_m,
+        gnss_position_lag_compensation_enable,
+        gnss_position_lag_compensation_sec,
+        gnss_position_lag_compensation_max_sec,
+        gnss_position_lag_compensation_min_speed_mps,
+        terminal_descent_observation_enable,
+        terminal_descent_require_rtl_mode,
+        terminal_descent_max_horizontal_speed_mps,
+        terminal_descent_min_vertical_speed_mps,
+        terminal_descent_max_gyro_deg_s,
+        terminal_descent_max_source_yaw_rate_deg_s,
+        terminal_descent_min_armed_time_sec,
+        terminal_descent_native_gnss_vel_override_enable,
+        terminal_descent_native_gnss_vel_std_h_mps,
+        terminal_descent_native_gnss_vel_std_u_mps,
+        terminal_descent_vertical_cov_reopen_enable,
+        terminal_descent_vertical_cov_reopen_pos_std_m,
+        terminal_descent_vertical_cov_reopen_vel_std_mps,
+        terminal_descent_vertical_cov_reopen_accbias_std_z_mps2,
+        terminal_descent_horizontal_zero_vel_enable,
+        terminal_descent_horizontal_zero_vel_max_hspeed_mps,
+        terminal_descent_horizontal_zero_vel_std_h_mps,
+        terminal_descent_horizontal_zero_vel_std_u_mps,
         aligned_path_require_armed,
         enable_ekf2_path,
         enable_iekf_path,
@@ -1120,6 +1357,7 @@ def generate_launch_description():
         enable_kf_gins,
         kf_gins_start_delay_sec,
         enable_iekf_aligned_path,
+        enable_static_tf,
         
         # 日志输出
         log_info,

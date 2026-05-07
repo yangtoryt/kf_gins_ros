@@ -28,6 +28,22 @@ from dataclasses import dataclass, field
 import math
 
 
+def parse_bool_param(value, default=False):
+    """Parse ROS parameters that may arrive as bools, numbers, or strings."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ('1', 'true', 'yes', 'on', 'y'):
+        return True
+    if text in ('0', 'false', 'no', 'off', 'n', 'none', 'disabled', '__disabled__', ''):
+        return False
+    return default
+
+
 @dataclass
 class PoseData:
     """位姿数据"""
@@ -95,6 +111,15 @@ class RealTimeComparison(Node):
         self.subscribe_ekf2_pose = bool(self.declare_parameter('subscribe_ekf2_pose', True).value)
         self.iekf_topic = self.declare_parameter('iekf_topic', '/kf_gins/odom').value
         self.iekf_raw_topic = self.declare_parameter('iekf_raw_topic', '').value
+        if str(self.iekf_raw_topic).strip().lower() in ('', 'none', 'false', 'off', 'disabled', '__disabled__'):
+            self.iekf_raw_topic = ''
+        self.compute_raw_metrics = parse_bool_param(
+            self.declare_parameter('compute_raw_metrics', False).value,
+            default=False,
+        )
+        self.raw_callback_mode = str(self.declare_parameter('raw_callback_mode', 'store').value).strip().lower()
+        if self.raw_callback_mode not in ('store', 'count_only', 'drop'):
+            self.raw_callback_mode = 'store'
         self.iekf_fallback_topic = self.declare_parameter('iekf_fallback_topic', '/kf_gins/fallback_active').value
         self.comparison_output = self.declare_parameter('comparison_output', '/comparison/metrics').value
         self.metrics_csv_path = self.declare_parameter('metrics_csv_path', '').value
@@ -131,6 +156,7 @@ class RealTimeComparison(Node):
         self.ekf2_data: Optional[PoseData] = None  # latest (for debug)
         self.iekf_data: Optional[PoseData] = None  # latest (for debug)
         self.iekf_raw_data: Optional[PoseData] = None  # latest raw core output
+        self.iekf_raw_callback_count = 0
         self.start_time = self.get_clock().now()
         self.ekf2_start_time: Optional[float] = None
         self.iekf_start_time: Optional[float] = None
@@ -323,6 +349,8 @@ class RealTimeComparison(Node):
             f"  EKF2 odom: {self.ekf2_odom_topic}\n"
             f"  IEKF: {self.iekf_topic}\n"
             f"  IEKF raw: {self.iekf_raw_topic if self.iekf_raw_topic else '(disabled)'}\n"
+            f"  Raw callback mode: {self.raw_callback_mode}\n"
+            f"  Raw metrics: {'开启' if self.compute_raw_metrics else '关闭'}\n"
             f"  Fallback topic: {self.iekf_fallback_topic if self.iekf_fallback_topic else '(disabled)'}\n"
             f"  IEKF reset topic: {self.iekf_reset_topic}\n"
             f"  CSV 输出: {self.metrics_csv_path if self.metrics_csv_path else '(disabled)'}\n"
@@ -463,6 +491,9 @@ class RealTimeComparison(Node):
     def iekf_raw_callback(self, msg: Odometry):
         """处理 raw IEKF 消息（不带业务 fallback）"""
         try:
+            self.iekf_raw_callback_count += 1
+            if self.raw_callback_mode in ('count_only', 'drop'):
+                return
             data = self._odom_to_pose_data(msg)
             if not self._accept_pose_sample("IEKF(raw)", data, self._last_valid_iekf_raw):
                 return
@@ -490,7 +521,10 @@ class RealTimeComparison(Node):
                 self.get_logger().warn("Synced data contains NaN/Inf; skipping metrics.", throttle_duration_sec=2)
                 return
 
-            raw_iekf, raw_dt_sec = self._find_closest_pose_with_dt(self.iekf_raw_buf, iekf.timestamp)
+            raw_iekf = None
+            raw_dt_sec = float('nan')
+            if self.compute_raw_metrics:
+                raw_iekf, raw_dt_sec = self._find_closest_pose_with_dt(self.iekf_raw_buf, iekf.timestamp)
             metrics = self._compute_metrics(ekf2, iekf, raw_iekf)
             if raw_iekf is not None and np.isfinite(raw_dt_sec):
                 metrics.raw_pair_dt_ms = float(raw_dt_sec) * 1000.0

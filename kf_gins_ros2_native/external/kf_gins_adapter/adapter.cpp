@@ -433,6 +433,19 @@ public:
     debug.update_mode = engine_debug.update_mode;
     debug.gnss_position_residual_neu_m = engine_debug.gnss_position_residual_neu_m;
     debug.gnss_position_std_neu_m = engine_debug.gnss_position_std_neu_m;
+    debug.gnss_position_innovation_cov_neu_m2 =
+      engine_debug.gnss_position_innovation_cov_neu_m2;
+    debug.gnss_position_nis_h_2d = engine_debug.gnss_position_nis_h_2d;
+    debug.gnss_position_nis_u_1d = engine_debug.gnss_position_nis_u_1d;
+    debug.gnss_position_nis_3d = engine_debug.gnss_position_nis_3d;
+    debug.gnss_position_gate_threshold_nis =
+      engine_debug.gnss_position_gate_threshold_nis;
+    debug.gnss_position_update_accepted =
+      engine_debug.gnss_position_update_accepted;
+    debug.gnss_position_update_rejected =
+      engine_debug.gnss_position_update_rejected;
+    debug.gnss_position_update_reason =
+      engine_debug.gnss_position_update_reason;
     debug.gnss_velocity_residual_ned_mps = engine_debug.gnss_velocity_residual_ned_mps;
     debug.gnss_velocity_std_ned_mps = engine_debug.gnss_velocity_std_ned_mps;
     return debug;

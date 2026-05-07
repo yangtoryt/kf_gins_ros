@@ -40,6 +40,24 @@ kf_gins_node:
     post_flight_vertical_cov_reopen_pos_std_m: 0.25
     post_flight_vertical_cov_reopen_vel_std_mps: 0.10
     post_flight_vertical_cov_reopen_accbias_std_z_mps2: 0.05
+    terminal_descent_observation_enable: false
+    terminal_descent_require_rtl_mode: true
+    terminal_descent_max_horizontal_speed_mps: 1.6
+    terminal_descent_min_vertical_speed_mps: 0.30
+    terminal_descent_max_gyro_deg_s: 30.0
+    terminal_descent_max_source_yaw_rate_deg_s: 30.0
+    terminal_descent_min_armed_time_sec: 0.0
+    terminal_descent_native_gnss_vel_override_enable: true
+    terminal_descent_native_gnss_vel_std_h_mps: 0.03
+    terminal_descent_native_gnss_vel_std_u_mps: 0.05
+    terminal_descent_vertical_cov_reopen_enable: true
+    terminal_descent_vertical_cov_reopen_pos_std_m: 0.15
+    terminal_descent_vertical_cov_reopen_vel_std_mps: 0.05
+    terminal_descent_vertical_cov_reopen_accbias_std_z_mps2: 0.05
+    terminal_descent_horizontal_zero_vel_enable: false
+    terminal_descent_horizontal_zero_vel_max_hspeed_mps: 0.30
+    terminal_descent_horizontal_zero_vel_std_h_mps: 0.05
+    terminal_descent_horizontal_zero_vel_std_u_mps: 10.0
     use_online_reset_covariance: true
     reset_pos_std_m: 5.0
     reset_vel_std_mps: 5.0
@@ -56,6 +74,18 @@ kf_gins_node:
     heading_update_source_jump_gate_deg: 20.0
     heading_update_source_jump_block_sec: 2.0
     heading_update_hard_innovation_gate_deg: 15.0
+    heading_track_validity_gate_enable: false
+    heading_track_validity_gate_action: inflate
+    heading_track_validity_gate_apply_to_update: true
+    heading_track_validity_gate_apply_to_turn_track: false
+    heading_track_validity_gate_apply_to_post_turn: true
+    heading_track_validity_gate_after_turn_sec: 20.0
+    heading_track_validity_gate_min_horizontal_speed_mps: 3.0
+    heading_track_validity_gate_max_vertical_speed_mps: 1.2
+    heading_track_validity_gate_max_gyro_deg_s: 6.0
+    heading_track_validity_gate_max_source_yaw_rate_deg_s: 1.0
+    heading_track_validity_gate_max_residual_deg: 2.0
+    heading_track_validity_gate_inflated_std_deg: 25.0
     heading_post_turn_reacquire_enable: true
     heading_post_turn_reacquire_window_sec: 2.0
     heading_post_turn_reacquire_max_residual_deg: 45.0

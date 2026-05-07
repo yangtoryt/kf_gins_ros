@@ -27,10 +27,12 @@
 #include <algorithm>
 #include <cmath>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <string>
 
 #include "kf_gins_ros2_native/kf_core_interface.hpp"
 #include "adapter.hpp"
@@ -118,6 +120,13 @@ public:
 
     path_rate_hz_    = this->declare_parameter<double>("path_publish_rate_hz", 5.0);
     pose_decimation_ = this->declare_parameter<int>("pose_decimation", 10);
+    raw_odom_decimation_ =
+      std::max(1, static_cast<int>(this->declare_parameter<int>("raw_odom_decimation", 50)));
+    core_processing_enable_ = this->declare_parameter<bool>("core_processing_enable", true);
+    core_imu_decimation_ =
+      std::max(1, static_cast<int>(this->declare_parameter<int>("core_imu_decimation", 1)));
+    core_max_imu_rate_hz_ =
+      std::max(0.0, this->declare_parameter<double>("core_max_imu_rate_hz", 0.0));
     max_path_pts_    = this->declare_parameter<int>("max_path_points", 20000);
     use_gnss_llh_for_pose_ = this->declare_parameter<bool>("use_gnss_llh_for_pose", true);
 
@@ -136,6 +145,16 @@ public:
     sim_gnss_std_h_m_ = this->declare_parameter<double>("sim_gnss_std_h_m", 0.1);  // 【修复】仿真 N/E std
     sim_gnss_std_u_m_ = this->declare_parameter<double>("sim_gnss_std_u_m", 0.2);  // 【修复】仿真 U std
     gnss_min_std_m_       = this->declare_parameter<double>("gnss_min_std_m", 0.5);        // clamp floor
+    gnss_position_lag_compensation_enable_ =
+      this->declare_parameter<bool>("gnss_position_lag_compensation_enable", false);
+    gnss_position_lag_compensation_sec_ =
+      this->declare_parameter<double>("gnss_position_lag_compensation_sec", 0.25);
+    gnss_position_lag_compensation_max_sec_ =
+      this->declare_parameter<double>("gnss_position_lag_compensation_max_sec", 0.50);
+    gnss_position_lag_compensation_min_speed_mps_ =
+      this->declare_parameter<double>("gnss_position_lag_compensation_min_speed_mps", 0.50);
+    gnss_position_lag_compensation_armed_only_ =
+      this->declare_parameter<bool>("gnss_position_lag_compensation_armed_only", true);
 
     // 追加参数（可被 launch 覆盖）
     start_after_gnss_sec_ = this->declare_parameter<double>("start_after_gnss_sec", 1.0); // 收到 GNSS 后先等一会再画
@@ -237,8 +256,48 @@ public:
       this->declare_parameter<double>("post_flight_vertical_cov_reopen_vel_std_mps", 0.10);
     post_flight_vertical_cov_reopen_accbias_std_z_mps2_ =
       this->declare_parameter<double>("post_flight_vertical_cov_reopen_accbias_std_z_mps2", 0.05);
+    terminal_descent_observation_enable_ =
+      this->declare_parameter<bool>("terminal_descent_observation_enable", false);
+    terminal_descent_require_rtl_mode_ =
+      this->declare_parameter<bool>("terminal_descent_require_rtl_mode", true);
+    terminal_descent_max_horizontal_speed_mps_ =
+      this->declare_parameter<double>("terminal_descent_max_horizontal_speed_mps", 1.6);
+    terminal_descent_min_vertical_speed_mps_ =
+      this->declare_parameter<double>("terminal_descent_min_vertical_speed_mps", 0.30);
+    terminal_descent_max_gyro_deg_s_ =
+      this->declare_parameter<double>("terminal_descent_max_gyro_deg_s", 30.0);
+    terminal_descent_max_source_yaw_rate_deg_s_ =
+      this->declare_parameter<double>("terminal_descent_max_source_yaw_rate_deg_s", 30.0);
+    terminal_descent_min_armed_time_sec_ =
+      this->declare_parameter<double>("terminal_descent_min_armed_time_sec", 0.0);
+    terminal_descent_native_gnss_vel_override_enable_ =
+      this->declare_parameter<bool>("terminal_descent_native_gnss_vel_override_enable", true);
+    terminal_descent_native_gnss_vel_std_h_mps_ =
+      this->declare_parameter<double>("terminal_descent_native_gnss_vel_std_h_mps", 0.03);
+    terminal_descent_native_gnss_vel_std_u_mps_ =
+      this->declare_parameter<double>("terminal_descent_native_gnss_vel_std_u_mps", 0.05);
+    terminal_descent_vertical_cov_reopen_enable_ =
+      this->declare_parameter<bool>("terminal_descent_vertical_cov_reopen_enable", true);
+    terminal_descent_vertical_cov_reopen_pos_std_m_ =
+      this->declare_parameter<double>("terminal_descent_vertical_cov_reopen_pos_std_m", 0.15);
+    terminal_descent_vertical_cov_reopen_vel_std_mps_ =
+      this->declare_parameter<double>("terminal_descent_vertical_cov_reopen_vel_std_mps", 0.05);
+    terminal_descent_vertical_cov_reopen_accbias_std_z_mps2_ =
+      this->declare_parameter<double>("terminal_descent_vertical_cov_reopen_accbias_std_z_mps2", 0.05);
+    terminal_descent_horizontal_zero_vel_enable_ =
+      this->declare_parameter<bool>("terminal_descent_horizontal_zero_vel_enable", false);
+    terminal_descent_horizontal_zero_vel_max_hspeed_mps_ =
+      this->declare_parameter<double>("terminal_descent_horizontal_zero_vel_max_hspeed_mps", 0.30);
+    terminal_descent_horizontal_zero_vel_std_h_mps_ =
+      this->declare_parameter<double>("terminal_descent_horizontal_zero_vel_std_h_mps", 0.05);
+    terminal_descent_horizontal_zero_vel_std_u_mps_ =
+      this->declare_parameter<double>("terminal_descent_horizontal_zero_vel_std_u_mps", 10.0);
     gnss_update_debug_csv_path_ =
       this->declare_parameter<std::string>("gnss_update_debug_csv_path", "");
+    gnss_nis_debug_csv_path_ =
+      this->declare_parameter<std::string>("gnss_nis_debug_csv_path", "");
+    gnss_nis_debug_max_rate_hz_ =
+      std::max(0.0, this->declare_parameter<double>("gnss_nis_debug_max_rate_hz", 2.0));
     heading_update_debug_csv_path_ =
       this->declare_parameter<std::string>("heading_update_debug_csv_path", "");
     state_publish_debug_csv_path_ =
@@ -266,6 +325,30 @@ public:
       this->declare_parameter<double>("heading_update_source_jump_block_sec", 2.0);
     heading_update_hard_innovation_gate_deg_ =
       this->declare_parameter<double>("heading_update_hard_innovation_gate_deg", 15.0);
+    heading_track_validity_gate_enable_ =
+      this->declare_parameter<bool>("heading_track_validity_gate_enable", false);
+    heading_track_validity_gate_action_ =
+      this->declare_parameter<std::string>("heading_track_validity_gate_action", "inflate");
+    heading_track_validity_gate_apply_to_update_ =
+      this->declare_parameter<bool>("heading_track_validity_gate_apply_to_update", true);
+    heading_track_validity_gate_apply_to_turn_track_ =
+      this->declare_parameter<bool>("heading_track_validity_gate_apply_to_turn_track", false);
+    heading_track_validity_gate_apply_to_post_turn_ =
+      this->declare_parameter<bool>("heading_track_validity_gate_apply_to_post_turn", true);
+    heading_track_validity_gate_after_turn_sec_ =
+      this->declare_parameter<double>("heading_track_validity_gate_after_turn_sec", 20.0);
+    heading_track_validity_gate_min_horizontal_speed_mps_ =
+      this->declare_parameter<double>("heading_track_validity_gate_min_horizontal_speed_mps", 3.0);
+    heading_track_validity_gate_max_vertical_speed_mps_ =
+      this->declare_parameter<double>("heading_track_validity_gate_max_vertical_speed_mps", 1.2);
+    heading_track_validity_gate_max_gyro_deg_s_ =
+      this->declare_parameter<double>("heading_track_validity_gate_max_gyro_deg_s", 6.0);
+    heading_track_validity_gate_max_source_yaw_rate_deg_s_ =
+      this->declare_parameter<double>("heading_track_validity_gate_max_source_yaw_rate_deg_s", 1.0);
+    heading_track_validity_gate_max_residual_deg_ =
+      this->declare_parameter<double>("heading_track_validity_gate_max_residual_deg", 2.0);
+    heading_track_validity_gate_inflated_std_deg_ =
+      this->declare_parameter<double>("heading_track_validity_gate_inflated_std_deg", 25.0);
     heading_post_turn_reacquire_enable_ =
       this->declare_parameter<bool>("heading_post_turn_reacquire_enable", true);
     heading_post_turn_reacquire_window_sec_ =
@@ -785,7 +868,21 @@ public:
       "GNSS settings: source=%s topic=%s",
       gnss_source_.c_str(),
       active_gnss_topic_name_.c_str());
+    RCLCPP_INFO(
+      get_logger(),
+      "Raw odom publish decimation: %d (/kf_gins/odom_raw publishes every Nth core state)",
+      raw_odom_decimation_);
+    RCLCPP_INFO(
+      get_logger(),
+      "Core IMU rate limit: decimation=%d, max_rate_hz=%.2f (0 disables max-rate gate)",
+      core_imu_decimation_, core_max_imu_rate_hz_);
+    if (!core_processing_enable_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "KF-GINS core processing disabled: subscriptions stay active, but IMU/GNSS callbacks skip core updates and state publication.");
+    }
     openGnssUpdateDebugCsv_();
+    openGnssNisDebugCsv_();
     openHeadingUpdateDebugCsv_();
     openStatePublishDebugCsv_();
 
@@ -829,6 +926,7 @@ private:
     const bool prev_armed = mavros_armed_;
     const double now_sec = now().seconds();
     mavros_armed_ = msg->armed;
+    mavros_mode_ = msg->mode;
 
     if (prev_armed != mavros_armed_) {
       last_disarmed_yaw_lock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
@@ -1046,6 +1144,12 @@ private:
     return normalizeAngleDeg_(a_deg - b_deg);
   }
 
+  bool isTerminalDescentFlightMode_() const
+  {
+    return mavros_mode_.find("RTL") != std::string::npos ||
+           mavros_mode_.find("LAND") != std::string::npos;
+  }
+
   ImuGapInfo maybeReportImuGap_(double input_stamp_sec, const rclcpp::Time& steady_now)
   {
     ImuGapInfo info;
@@ -1085,6 +1189,113 @@ private:
         active_imu_topic_name_.c_str());
     }
     return info;
+  }
+
+  void clearCoreImuRateLimitState_()
+  {
+    have_core_imu_accumulator_ = false;
+    core_imu_accum_feed_delta_ = false;
+    core_imu_accum_dt_sec_ = 0.0;
+    core_imu_accum_dtheta_.setZero();
+    core_imu_accum_dvel_.setZero();
+    last_core_imu_rate_limit_process_steady_sec_ = std::numeric_limits<double>::quiet_NaN();
+    core_imu_rate_limit_input_count_ = 0;
+    core_imu_rate_limit_skip_count_ = 0;
+    core_imu_rate_limit_process_count_ = 0;
+  }
+
+  bool maybeHoldCoreImuForRateLimit_(
+    double steady_now_sec,
+    bool feed_core_with_delta,
+    double& dt,
+    Eigen::Vector3d& dtheta,
+    Eigen::Vector3d& dvel)
+  {
+    const bool decimation_active = core_imu_decimation_ > 1;
+    const bool max_rate_active = std::isfinite(core_max_imu_rate_hz_) && core_max_imu_rate_hz_ > 0.0;
+    if (!decimation_active && !max_rate_active) {
+      return false;
+    }
+    if (!std::isfinite(dt) || dt <= 0.0) {
+      return false;
+    }
+
+    if (have_core_imu_accumulator_ &&
+        core_imu_accum_feed_delta_ != feed_core_with_delta) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Core IMU rate-limit accumulator reset because input representation changed (delta=%s).",
+        feed_core_with_delta ? "true" : "false");
+      have_core_imu_accumulator_ = false;
+      core_imu_accum_dt_sec_ = 0.0;
+      core_imu_accum_dtheta_.setZero();
+      core_imu_accum_dvel_.setZero();
+    }
+
+    if (!have_core_imu_accumulator_) {
+      have_core_imu_accumulator_ = true;
+      core_imu_accum_feed_delta_ = feed_core_with_delta;
+      core_imu_accum_dt_sec_ = 0.0;
+      core_imu_accum_dtheta_.setZero();
+      core_imu_accum_dvel_.setZero();
+    }
+
+    ++core_imu_rate_limit_input_count_;
+    core_imu_accum_dt_sec_ += dt;
+    if (feed_core_with_delta) {
+      core_imu_accum_dtheta_ += dtheta;
+      core_imu_accum_dvel_ += dvel;
+    } else {
+      core_imu_accum_dtheta_ += dtheta * dt;
+      core_imu_accum_dvel_ += dvel * dt;
+    }
+
+    const bool decimation_ready =
+      !decimation_active ||
+      ((core_imu_rate_limit_input_count_ % static_cast<std::uint64_t>(core_imu_decimation_)) == 0);
+    bool max_rate_ready = true;
+    if (max_rate_active && std::isfinite(last_core_imu_rate_limit_process_steady_sec_)) {
+      const double min_period_sec = 1.0 / std::max(1e-6, core_max_imu_rate_hz_);
+      max_rate_ready =
+        (steady_now_sec - last_core_imu_rate_limit_process_steady_sec_) >= min_period_sec;
+    }
+
+    if (!decimation_ready || !max_rate_ready) {
+      ++core_imu_rate_limit_skip_count_;
+      RCLCPP_INFO_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Core IMU rate limit holding samples: input=%lu processed=%lu skipped=%lu accum_dt=%.4f s "
+        "(decimation=%d, max_rate_hz=%.2f)",
+        static_cast<unsigned long>(core_imu_rate_limit_input_count_),
+        static_cast<unsigned long>(core_imu_rate_limit_process_count_),
+        static_cast<unsigned long>(core_imu_rate_limit_skip_count_),
+        core_imu_accum_dt_sec_,
+        core_imu_decimation_,
+        core_max_imu_rate_hz_);
+      return true;
+    }
+
+    dt = core_imu_accum_dt_sec_;
+    if (!std::isfinite(dt) || dt <= 0.0) {
+      have_core_imu_accumulator_ = false;
+      core_imu_accum_dt_sec_ = 0.0;
+      core_imu_accum_dtheta_.setZero();
+      core_imu_accum_dvel_.setZero();
+      return false;
+    }
+    dtheta = feed_core_with_delta ? core_imu_accum_dtheta_ : (core_imu_accum_dtheta_ / dt);
+    dvel = feed_core_with_delta ? core_imu_accum_dvel_ : (core_imu_accum_dvel_ / dt);
+
+    have_core_imu_accumulator_ = false;
+    core_imu_accum_dt_sec_ = 0.0;
+    core_imu_accum_dtheta_.setZero();
+    core_imu_accum_dvel_.setZero();
+    last_core_imu_rate_limit_process_steady_sec_ = steady_now_sec;
+    ++core_imu_rate_limit_process_count_;
+    last_processed_imu_effective_dt_sec_ = dt;
+    last_medium_imu_gap_segmented_ = false;
+    last_medium_imu_gap_segmented_steps_ = 1;
+    return false;
   }
 
   bool maybeHandleNonDeltaSourceGap_(
@@ -1191,6 +1402,7 @@ private:
     last_turning_heading_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     last_heading_underreaction_force_relock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     last_tilt_force_relock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    clearCoreImuRateLimitState_();
     active_tilt_force_relock_context_id_ = 0;
     tilt_force_relock_applied_in_active_context_ = false;
     last_post_turn_reacquire_time_sec_ = std::numeric_limits<double>::quiet_NaN();
@@ -1267,6 +1479,7 @@ private:
     last_turning_heading_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     last_heading_underreaction_force_relock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
     last_tilt_force_relock_time_sec_ = std::numeric_limits<double>::quiet_NaN();
+    clearCoreImuRateLimitState_();
     active_tilt_force_relock_context_id_ = 0;
     tilt_force_relock_applied_in_active_context_ = false;
     last_post_turn_reacquire_time_sec_ = std::numeric_limits<double>::quiet_NaN();
@@ -1613,6 +1826,96 @@ private:
       if (cruise_track_std_deg < heading_measurement_std_deg) {
         heading_measurement_std_deg = cruise_track_std_deg;
         heading_mode = "armed_cruise_track";
+      }
+    }
+
+    if (heading_track_validity_gate_enable_ &&
+        mavros_armed_ &&
+        have_fresh_mavros_speed) {
+      const bool h2_normal_update =
+        std::strcmp(heading_mode, "update") == 0 ||
+        std::strcmp(heading_mode, "armed_cruise_track") == 0;
+      const bool h2_turn_track = std::strcmp(heading_mode, "turn_track") == 0;
+      const bool h2_post_turn_track = std::strncmp(heading_mode, "post_turn", 9) == 0;
+      const bool h2_mode_ok =
+        (h2_normal_update && heading_track_validity_gate_apply_to_update_) ||
+        (h2_turn_track && heading_track_validity_gate_apply_to_turn_track_) ||
+        (h2_post_turn_track && heading_track_validity_gate_apply_to_post_turn_);
+      const double h2_since_turn_sec =
+        std::isfinite(last_turning_heading_time_sec_)
+          ? now_sec - last_turning_heading_time_sec_
+          : std::numeric_limits<double>::infinity();
+      const bool h2_after_turn_ok =
+        heading_track_validity_gate_after_turn_sec_ <= 0.0 ||
+        (std::isfinite(h2_since_turn_sec) &&
+         h2_since_turn_sec >= 0.0 &&
+         h2_since_turn_sec <= heading_track_validity_gate_after_turn_sec_);
+      const bool h2_horiz_ok =
+        heading_track_validity_gate_min_horizontal_speed_mps_ <= 0.0 ||
+        last_mavros_horizontal_speed_mps_ >=
+          heading_track_validity_gate_min_horizontal_speed_mps_;
+      const bool h2_vert_ok =
+        heading_track_validity_gate_max_vertical_speed_mps_ <= 0.0 ||
+        std::abs(last_mavros_vertical_speed_mps_) <=
+          heading_track_validity_gate_max_vertical_speed_mps_;
+      const bool h2_gyro_ok =
+        heading_track_validity_gate_max_gyro_deg_s_ <= 0.0 ||
+        !std::isfinite(last_imu_gyro_norm_deg_s_) ||
+        last_imu_gyro_norm_deg_s_ <= heading_track_validity_gate_max_gyro_deg_s_;
+      const bool h2_source_rate_ok =
+        heading_track_validity_gate_max_source_yaw_rate_deg_s_ <= 0.0 ||
+        !std::isfinite(last_mavros_heading_rate_deg_s_) ||
+        std::abs(last_mavros_heading_rate_deg_s_) <=
+          heading_track_validity_gate_max_source_yaw_rate_deg_s_;
+      const bool h2_residual_ok =
+        heading_track_validity_gate_max_residual_deg_ <= 0.0 ||
+        residual_abs_deg <= heading_track_validity_gate_max_residual_deg_;
+
+      if (h2_mode_ok &&
+          h2_after_turn_ok &&
+          h2_horiz_ok &&
+          h2_vert_ok &&
+          h2_gyro_ok &&
+          h2_source_rate_ok &&
+          h2_residual_ok) {
+        const char* h2_original_heading_mode = heading_mode;
+        if (heading_track_validity_gate_action_ == "skip") {
+          RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 1000,
+            "Skip heading update: H2 track-validity gate blocked %s "
+            "(residual=%.2f deg, since_turn=%.2f s, horiz=%.2f m/s, vert=%.2f m/s, "
+            "gyro=%.2f deg/s, source_yaw_rate=%.2f deg/s)",
+            h2_original_heading_mode,
+            yaw_residual_deg,
+            h2_since_turn_sec,
+            last_mavros_horizontal_speed_mps_,
+            last_mavros_vertical_speed_mps_,
+            last_imu_gyro_norm_deg_s_,
+            last_mavros_heading_rate_deg_s_);
+          return;
+        }
+
+        const double inflated_heading_std_deg =
+          std::max(
+            heading_measurement_std_deg,
+            std::abs(heading_track_validity_gate_inflated_std_deg_));
+        if (inflated_heading_std_deg > heading_measurement_std_deg) {
+          heading_measurement_std_deg = inflated_heading_std_deg;
+          heading_mode = "h2_track_validity_inflated";
+          RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 1000,
+            "Inflated heading update: H2 track-validity gate changed %s std to %.2f deg "
+            "(residual=%.2f deg, since_turn=%.2f s, horiz=%.2f m/s, vert=%.2f m/s, "
+            "gyro=%.2f deg/s, source_yaw_rate=%.2f deg/s)",
+            h2_original_heading_mode,
+            heading_measurement_std_deg,
+            yaw_residual_deg,
+            h2_since_turn_sec,
+            last_mavros_horizontal_speed_mps_,
+            last_mavros_vertical_speed_mps_,
+            last_imu_gyro_norm_deg_s_,
+            last_mavros_heading_rate_deg_s_);
+        }
       }
     }
 
@@ -2430,6 +2733,17 @@ private:
 
   void processImuSample_(const ImuSample& sample, double raw_t, const rclcpp::Time& steady_now)
   {
+    if (!core_processing_enable_) {
+      if (!reported_core_processing_disabled_imu_) {
+        RCLCPP_WARN(
+          get_logger(),
+          "Core processing disabled: received first IMU sample on %s but skipped propagation.",
+          active_imu_topic_name_.c_str());
+        reported_core_processing_disabled_imu_ = true;
+      }
+      return;
+    }
+
     const ImuGapInfo imu_gap = maybeReportImuGap_(sample.source_stamp_sec, steady_now);
     const bool source_gap_detected =
       source_gap_clamp_enable_ &&
@@ -2701,7 +3015,7 @@ private:
       imu_dt_estimate_sec_ = 0.80 * imu_dt_estimate_sec_ + 0.20 * dt;
     }
 
-    const bool feed_core_with_delta = sample.data_is_delta && !bridge_delta_source_gap_as_rates;
+    bool feed_core_with_delta = sample.data_is_delta && !bridge_delta_source_gap_as_rates;
     Eigen::Vector3d dtheta = bridge_delta_source_gap_as_rates ? aux_angular : sample.angular;
     Eigen::Vector3d dvel = bridge_delta_source_gap_as_rates ? aux_linear : sample.linear;
 
@@ -2717,6 +3031,16 @@ private:
     if (!dtheta.allFinite() || !dvel.allFinite()) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "IMU contains NaN/Inf, skipping.");
       return;
+    }
+
+    if (maybeHoldCoreImuForRateLimit_(
+          steady_now.seconds(), feed_core_with_delta, dt, dtheta, dvel)) {
+      return;
+    }
+    if (core_imu_decimation_ > 1 ||
+        (std::isfinite(core_max_imu_rate_hz_) && core_max_imu_rate_hz_ > 0.0)) {
+      use_segmented_propagation = false;
+      segmented_propagation_steps = 1;
     }
 
     double final_t = std::numeric_limits<double>::quiet_NaN();
@@ -2752,6 +3076,7 @@ private:
     if (std::isfinite(final_t)) {
       maybeApplyHeadingUpdate_(final_t);
     }
+    logGnssNisDebugIfNeeded_();
     logObservationDebugIfNeeded_();
     publishState();
   }
@@ -2772,6 +3097,17 @@ private:
     double native_vD = std::numeric_limits<double>::quiet_NaN(),
     double native_speed_std_mps = std::numeric_limits<double>::quiet_NaN())
   {
+    if (!core_processing_enable_) {
+      if (!reported_core_processing_disabled_gnss_) {
+        RCLCPP_WARN(
+          get_logger(),
+          "Core processing disabled: received first GNSS sample on %s but skipped filter update.",
+          active_gnss_topic_name_.c_str());
+        reported_core_processing_disabled_gnss_ = true;
+      }
+      return;
+    }
+
     double t = t_raw;
     bool reset_this_gnss = false;
     const double now_sec = now().seconds();
@@ -2788,6 +3124,10 @@ private:
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "GNSS contains NaN/Inf, skipping.");
       return;
     }
+
+    double measurement_latitude = latitude;
+    double measurement_longitude = longitude;
+    double measurement_altitude = altitude;
 
     last_gnss_lat_rad_ = latitude  * M_PI/180.0;
     last_gnss_lon_rad_ = longitude * M_PI/180.0;
@@ -2853,6 +3193,77 @@ private:
         t = last_core_time_ + 1e-3;
       }
     }
+
+    const bool have_native_gnss_velocity =
+      native_velocity_valid &&
+      std::isfinite(native_vN) &&
+      std::isfinite(native_vE) &&
+      std::isfinite(native_vD);
+    bool position_lag_compensation_active = false;
+    double position_lag_compensation_sec = std::numeric_limits<double>::quiet_NaN();
+    double position_lag_compensation_n_m = std::numeric_limits<double>::quiet_NaN();
+    double position_lag_compensation_e_m = std::numeric_limits<double>::quiet_NaN();
+    double position_lag_compensation_u_m = std::numeric_limits<double>::quiet_NaN();
+    const double requested_lag_sec = std::abs(gnss_position_lag_compensation_sec_);
+    const double max_lag_sec = std::max(0.0, std::abs(gnss_position_lag_compensation_max_sec_));
+    const double lag_sec = std::min(requested_lag_sec, max_lag_sec);
+    const double native_horizontal_speed_mps =
+      have_native_gnss_velocity ? std::hypot(native_vN, native_vE) : std::numeric_limits<double>::quiet_NaN();
+    const bool lag_compensation_context =
+      gnss_position_lag_compensation_enable_ &&
+      use_integrated_time_for_core_ &&
+      (!gnss_position_lag_compensation_armed_only_ || mavros_armed_) &&
+      have_native_gnss_velocity &&
+      std::isfinite(native_horizontal_speed_mps) &&
+      native_horizontal_speed_mps >= std::max(0.0, gnss_position_lag_compensation_min_speed_mps_) &&
+      lag_sec > 0.0;
+    if (lag_compensation_context) {
+      const double lat_rad = latitude * M_PI / 180.0;
+      const double lon_rad = longitude * M_PI / 180.0;
+      const double sin_lat = std::sin(lat_rad);
+      const double cos_lat = std::cos(lat_rad);
+      const double denom = std::sqrt(1.0 - geo::WGS84_E2 * sin_lat * sin_lat);
+      if (std::isfinite(denom) && denom > 0.0 && std::isfinite(cos_lat) && std::abs(cos_lat) > 1e-6) {
+        const double rn = geo::WGS84_A / denom;
+        const double rm =
+          geo::WGS84_A * (1.0 - geo::WGS84_E2) /
+          std::pow(1.0 - geo::WGS84_E2 * sin_lat * sin_lat, 1.5);
+        const double dN_m = native_vN * lag_sec;
+        const double dE_m = native_vE * lag_sec;
+        const double dU_m = -native_vD * lag_sec;
+        const double lat_comp_rad = lat_rad + dN_m / std::max(1.0, rm + altitude);
+        const double lon_comp_rad =
+          lon_rad +
+          dE_m / std::max(1.0, (rn + altitude) * std::max(1e-6, std::abs(cos_lat)));
+        const double alt_comp_m = altitude + dU_m;
+        if (std::isfinite(lat_comp_rad) && std::isfinite(lon_comp_rad) && std::isfinite(alt_comp_m)) {
+          measurement_latitude = lat_comp_rad * 180.0 / M_PI;
+          measurement_longitude = lon_comp_rad * 180.0 / M_PI;
+          measurement_altitude = alt_comp_m;
+          position_lag_compensation_active = true;
+          position_lag_compensation_sec = lag_sec;
+          position_lag_compensation_n_m = dN_m;
+          position_lag_compensation_e_m = dE_m;
+          position_lag_compensation_u_m = dU_m;
+          if (!logged_gnss_position_lag_compensation_) {
+            RCLCPP_INFO(
+              get_logger(),
+              "GNSS position lag compensation enabled: lag=%.3fs min_speed=%.3fm/s "
+              "first_delta_neu=(%.3f, %.3f, %.3f)m",
+              lag_sec,
+              std::max(0.0, gnss_position_lag_compensation_min_speed_mps_),
+              dN_m,
+              dE_m,
+              dU_m);
+            logged_gnss_position_lag_compensation_ = true;
+          }
+        }
+      }
+    }
+
+    last_gnss_lat_rad_ = measurement_latitude  * M_PI/180.0;
+    last_gnss_lon_rad_ = measurement_longitude * M_PI/180.0;
+    last_gnss_h_m_     = measurement_altitude;
 
     const HeadingMotionContext motion_ctx = buildHeadingMotionContext_(now_sec, false);
     const bool position_override_context =
@@ -3054,13 +3465,29 @@ private:
         refresh_core_vertical_debug();
       }
     }
+    const bool terminal_descent_vertical_cov_reopen_active =
+      terminal_descent_vertical_cov_reopen_enable_ &&
+      motion_ctx.terminal_descent_context;
+    bool terminal_descent_vertical_cov_reopen_applied = false;
+    if (terminal_descent_vertical_cov_reopen_active) {
+      terminal_descent_vertical_cov_reopen_applied = core_->reopenVerticalCovariance(
+        std::max(0.01, std::abs(terminal_descent_vertical_cov_reopen_pos_std_m_)),
+        std::max(0.01, std::abs(terminal_descent_vertical_cov_reopen_vel_std_mps_)),
+        std::max(1e-4, std::abs(terminal_descent_vertical_cov_reopen_accbias_std_z_mps2_)));
+      if (terminal_descent_vertical_cov_reopen_applied) {
+        refresh_core_vertical_debug();
+      }
+    }
     const bool any_vertical_cov_reopen_active =
-      vertical_cov_reopen_active || post_flight_vertical_cov_reopen_active;
+      vertical_cov_reopen_active || post_flight_vertical_cov_reopen_active ||
+      terminal_descent_vertical_cov_reopen_active;
     const bool any_vertical_cov_reopen_applied =
-      vertical_cov_reopen_applied || post_flight_vertical_cov_reopen_applied;
+      vertical_cov_reopen_applied || post_flight_vertical_cov_reopen_applied ||
+      terminal_descent_vertical_cov_reopen_applied;
 
     Eigen::Vector3d std_ned(-1,-1,-1);
     bool position_override_active = false;
+    std::string gnss_position_std_source_label{"unknown"};
     
     // 始终检查仿真模式，如果启用则直接使用仿真参数
     // （即使msg中有协方差，也优先信任仿真参数）
@@ -3073,6 +3500,7 @@ private:
         std::max(floor, sim_gnss_std_h_m_),
         std::max(floor, sim_gnss_std_h_m_),
         std::max(floor, sim_gnss_std_u_m_));
+      gnss_position_std_source_label = "sim_param";
       if (!have_sim_gnss_logged_) {
         RCLCPP_INFO(get_logger(), "✓ Simulation GNSS mode: std_h=%.3fm, std_u=%.3fm (no min-clamp)", 
                     sim_gnss_std_h_m_, sim_gnss_std_u_m_);
@@ -3088,12 +3516,14 @@ private:
         std::max(gnss_min_std_m_, std_n),
         std::max(gnss_min_std_m_, std_e),
         std::max(gnss_min_std_m_, std_u));
+      gnss_position_std_source_label = "navsat_covariance";
     } else {
       // 实机模式 + msg无协方差：使用默认实机参数
       std_ned = Eigen::Vector3d(
         std::max(gnss_min_std_m_, gnss_default_std_h_m_),
         std::max(gnss_min_std_m_, gnss_default_std_h_m_),
         std::max(gnss_min_std_m_, gnss_default_std_u_m_));
+      gnss_position_std_source_label = "default_param";
     }
 
     if (armed_cruise_gnss_pos_override_enable_ && position_override_context) {
@@ -3106,6 +3536,7 @@ private:
       std_ned.y() = std::min(std_ned.y(), override_std_h_m);
       std_ned.z() = std::min(std_ned.z(), override_std_u_m);
       position_override_active = true;
+      gnss_position_std_source_label += "+armed_cruise_override";
     }
 
     if (residual_position_boost_active) {
@@ -3118,6 +3549,7 @@ private:
       std_ned.y() = std::min(std_ned.y(), override_std_h_m);
       std_ned.z() = std::min(std_ned.z(), override_std_u_m);
       position_override_active = true;
+      gnss_position_std_source_label += "+residual_boost";
     }
 
     // Pre-arm yaw lock is useful when the first GNSS reset had to fall back to yaw=0
@@ -3168,7 +3600,7 @@ private:
       // 不再 return，让 GNSS 位置观测正常处理
     }
 
-    if (!core_->ingestGnss(t, latitude, longitude, altitude, std_ned)) {
+    if (!core_->ingestGnss(t, measurement_latitude, measurement_longitude, measurement_altitude, std_ned)) {
       pending_gnss_debug_context_.valid = false;
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "core_->ingestGnss() failed");
       return;
@@ -3179,13 +3611,11 @@ private:
     // 这是解决姿态（尤其 yaw）不可观的关键：速度观测让 H 矩阵覆盖了 V 状态，
     // 通过 F 矩阵中的 V↔PHI 耦合，间接使姿态可观。
     // 当 ZUPT 已应用时跳过（ZUPT 的 0.05 m/s std 比位置差分的 ~0.7 m/s 更紧）
-    const bool have_native_gnss_velocity =
-      native_velocity_valid &&
-      std::isfinite(native_vN) &&
-      std::isfinite(native_vE) &&
-      std::isfinite(native_vD);
     bool native_velocity_used = false;
     bool native_velocity_override_active = false;
+    bool terminal_descent_native_velocity_override_active = false;
+    bool terminal_descent_horizontal_zero_velocity_active = false;
+    bool terminal_descent_horizontal_zero_velocity_applied = false;
     bool residual_velocity_boost_applied = false;
     double native_velocity_std_h_mps = std::numeric_limits<double>::quiet_NaN();
     double native_velocity_std_u_mps = std::numeric_limits<double>::quiet_NaN();
@@ -3195,7 +3625,13 @@ private:
       native_velocity_override_active =
         armed_cruise_native_gnss_vel_override_enable_ &&
         motion_ctx.native_velocity_tightening_context;
-      if (native_velocity_override_active) {
+      terminal_descent_native_velocity_override_active =
+        terminal_descent_native_gnss_vel_override_enable_ &&
+        motion_ctx.terminal_descent_context;
+      if (terminal_descent_native_velocity_override_active) {
+        vel_floor_h = std::max(0.03, std::abs(terminal_descent_native_gnss_vel_std_h_mps_));
+        vel_floor_u = std::max(0.03, std::abs(terminal_descent_native_gnss_vel_std_u_mps_));
+      } else if (native_velocity_override_active) {
         vel_floor_h = std::max(0.03, std::abs(armed_cruise_native_gnss_vel_std_h_mps_));
         vel_floor_u = std::max(0.08, std::abs(armed_cruise_native_gnss_vel_std_u_mps_));
       }
@@ -3211,7 +3647,9 @@ private:
           ? native_speed_std_mps * std::max(0.0, native_gnss_speed_std_scale_)
           : std::numeric_limits<double>::quiet_NaN();
       Eigen::Vector3d vel_std;
-      if (native_velocity_override_active || residual_velocity_boost_applied) {
+      if (terminal_descent_native_velocity_override_active ||
+          native_velocity_override_active ||
+          residual_velocity_boost_applied) {
         vel_std = Eigen::Vector3d(vel_floor_h, vel_floor_h, vel_floor_u);
       } else {
         vel_std = Eigen::Vector3d(
@@ -3234,10 +3672,10 @@ private:
     } else if (enable_gnss_velocity_update_ && !zupt_applied && have_prev_gnss_for_vel_) {
       const double dt_gnss = t - prev_gnss_vel_time_;
       if (std::isfinite(dt_gnss) && dt_gnss > 0.05 && dt_gnss < 5.0) {
-        const double lat_avg = (latitude * M_PI/180.0 + prev_gnss_vel_lat_rad_) * 0.5;
-        const double dlat_rad = latitude * M_PI/180.0 - prev_gnss_vel_lat_rad_;
-        const double dlon_rad = longitude * M_PI/180.0 - prev_gnss_vel_lon_rad_;
-        const double dh = altitude - prev_gnss_vel_h_;
+        const double lat_avg = (measurement_latitude * M_PI/180.0 + prev_gnss_vel_lat_rad_) * 0.5;
+        const double dlat_rad = measurement_latitude * M_PI/180.0 - prev_gnss_vel_lat_rad_;
+        const double dlon_rad = measurement_longitude * M_PI/180.0 - prev_gnss_vel_lon_rad_;
+        const double dh = measurement_altitude - prev_gnss_vel_h_;
 
         // 使用简化的地球半径（WGS84 平均值）
         const double R_earth = 6371000.0;
@@ -3259,19 +3697,57 @@ private:
         }
       }
     }
+    terminal_descent_horizontal_zero_velocity_active =
+      enable_gnss_velocity_update_ &&
+      terminal_descent_horizontal_zero_vel_enable_ &&
+      motion_ctx.terminal_descent_context &&
+      std::isfinite(last_mavros_horizontal_speed_mps_) &&
+      last_mavros_horizontal_speed_mps_ <=
+        std::max(0.0, terminal_descent_horizontal_zero_vel_max_hspeed_mps_);
+    if (terminal_descent_horizontal_zero_velocity_active) {
+      const double std_h_mps =
+        std::max(0.01, std::abs(terminal_descent_horizontal_zero_vel_std_h_mps_));
+      const double std_u_mps =
+        std::max(0.01, std::abs(terminal_descent_horizontal_zero_vel_std_u_mps_));
+      double vD_observation_mps =
+        std::isfinite(native_vD) ? native_vD : core_state_before_update.vD;
+      if (!std::isfinite(vD_observation_mps)) {
+        vD_observation_mps = 0.0;
+      }
+      const Eigen::Vector3d zero_horiz_vel_std(std_h_mps, std_h_mps, std_u_mps);
+      core_->ingestGnssVel(t, 0.0, 0.0, vD_observation_mps, zero_horiz_vel_std);
+      terminal_descent_horizontal_zero_velocity_applied = true;
+    }
     pending_gnss_debug_context_.valid = true;
     pending_gnss_debug_context_.native_velocity_valid = have_native_gnss_velocity;
     pending_gnss_debug_context_.native_velocity_used = native_velocity_used;
-    pending_gnss_debug_context_.native_velocity_override_active = native_velocity_override_active;
+    pending_gnss_debug_context_.native_velocity_override_active =
+      native_velocity_override_active || terminal_descent_native_velocity_override_active;
+    pending_gnss_debug_context_.terminal_descent_native_velocity_override_active =
+      terminal_descent_native_velocity_override_active;
+    pending_gnss_debug_context_.terminal_descent_horizontal_zero_velocity_active =
+      terminal_descent_horizontal_zero_velocity_active;
+    pending_gnss_debug_context_.terminal_descent_horizontal_zero_velocity_applied =
+      terminal_descent_horizontal_zero_velocity_applied;
     pending_gnss_debug_context_.velocity_residual_boost_active = residual_velocity_boost_applied;
     pending_gnss_debug_context_.position_override_active = position_override_active;
     pending_gnss_debug_context_.position_residual_boost_active = residual_position_boost_active;
+    pending_gnss_debug_context_.position_lag_compensation_active =
+      position_lag_compensation_active;
+    pending_gnss_debug_context_.position_lag_compensation_sec = position_lag_compensation_sec;
+    pending_gnss_debug_context_.position_lag_compensation_n_m = position_lag_compensation_n_m;
+    pending_gnss_debug_context_.position_lag_compensation_e_m = position_lag_compensation_e_m;
+    pending_gnss_debug_context_.position_lag_compensation_u_m = position_lag_compensation_u_m;
     pending_gnss_debug_context_.vertical_cov_reopen_active = any_vertical_cov_reopen_active;
     pending_gnss_debug_context_.vertical_cov_reopen_applied = any_vertical_cov_reopen_applied;
     pending_gnss_debug_context_.post_flight_vertical_cov_reopen_active =
       post_flight_vertical_cov_reopen_active;
     pending_gnss_debug_context_.post_flight_vertical_cov_reopen_applied =
       post_flight_vertical_cov_reopen_applied;
+    pending_gnss_debug_context_.terminal_descent_vertical_cov_reopen_active =
+      terminal_descent_vertical_cov_reopen_active;
+    pending_gnss_debug_context_.terminal_descent_vertical_cov_reopen_applied =
+      terminal_descent_vertical_cov_reopen_applied;
     pending_gnss_debug_context_.armed = mavros_armed_;
     pending_gnss_debug_context_.have_fresh_speed = motion_ctx.have_fresh_mavros_speed;
     pending_gnss_debug_context_.turning_now = motion_ctx.turning_now;
@@ -3279,6 +3755,8 @@ private:
     pending_gnss_debug_context_.armed_cruise_context = motion_ctx.armed_cruise_force_relock_context;
     pending_gnss_debug_context_.native_velocity_tightening_context =
       motion_ctx.native_velocity_tightening_context;
+    pending_gnss_debug_context_.terminal_descent_context =
+      motion_ctx.terminal_descent_context;
     pending_gnss_debug_context_.medium_gap_active = last_medium_imu_gap_active_;
     pending_gnss_debug_context_.medium_gap_segmented = last_medium_imu_gap_segmented_;
     pending_gnss_debug_context_.medium_gap_conservative_single_step =
@@ -3295,6 +3773,17 @@ private:
     pending_gnss_debug_context_.core_accbias_std_z_mps2 = core_accbias_std_z_mps2;
     pending_gnss_debug_context_.ros_time_sec = now_sec;
     pending_gnss_debug_context_.update_time_sec = t;
+    pending_gnss_debug_context_.armed_time_sec =
+      (mavros_armed_ && std::isfinite(last_armed_transition_time_sec_))
+        ? now_sec - last_armed_transition_time_sec_
+        : std::numeric_limits<double>::quiet_NaN();
+    pending_gnss_debug_context_.latest_heading_update_age_sec =
+      std::isfinite(last_heading_update_time_sec_)
+        ? now_sec - last_heading_update_time_sec_
+        : std::numeric_limits<double>::quiet_NaN();
+    pending_gnss_debug_context_.mavros_mode = mavros_mode_;
+    pending_gnss_debug_context_.gnss_position_std_source_label =
+      gnss_position_std_source_label;
     pending_gnss_debug_context_.horizontal_speed_mps = last_mavros_horizontal_speed_mps_;
     pending_gnss_debug_context_.vertical_speed_mps = last_mavros_vertical_speed_mps_;
     pending_gnss_debug_context_.gyro_deg_s = last_imu_gyro_norm_deg_s_;
@@ -3317,9 +3806,9 @@ private:
     pending_gnss_debug_context_.core_velocity_vN_mps = core_state_before_update.vN;
     pending_gnss_debug_context_.core_velocity_vE_mps = core_state_before_update.vE;
     pending_gnss_debug_context_.core_velocity_vD_mps = core_state_before_update.vD;
-    prev_gnss_vel_lat_rad_ = latitude  * M_PI/180.0;
-    prev_gnss_vel_lon_rad_ = longitude * M_PI/180.0;
-    prev_gnss_vel_h_       = altitude;
+    prev_gnss_vel_lat_rad_ = measurement_latitude  * M_PI/180.0;
+    prev_gnss_vel_lon_rad_ = measurement_longitude * M_PI/180.0;
+    prev_gnss_vel_h_       = measurement_altitude;
     prev_gnss_vel_time_    = t;
     have_prev_gnss_for_vel_ = true;
 
@@ -3514,6 +4003,17 @@ private:
   }
 
   // ------------------------- Publish -------------------------
+  bool shouldPublishRawOdom_()
+  {
+    if (raw_odom_decimation_ <= 1) {
+      return true;
+    }
+    const bool publish =
+      (raw_odom_publish_counter_ % static_cast<std::uint64_t>(raw_odom_decimation_)) == 0;
+    ++raw_odom_publish_counter_;
+    return publish;
+  }
+
   void publishState()
   {
     if (!have_origin_) return;
@@ -3707,7 +4207,7 @@ private:
 
     nav_msgs::msg::Odometry od = make_odom_msg(enu_vis);
     odom_pub_->publish(od);
-    if (have_core_enu) {
+    if (have_core_enu && shouldPublishRawOdom_()) {
       odom_raw_pub_->publish(make_odom_msg(enu_core));
     }
     logStatePublishDebug_(
@@ -3799,6 +4299,8 @@ private:
     bool post_turn_cruise_motion_ok{false};
     bool armed_cruise_force_relock_context{false};
     bool native_velocity_tightening_context{false};
+    bool terminal_descent_context{false};
+    bool terminal_descent_mode_ok{false};
     bool armed_cruise_force_relock_gyro_ok{false};
     bool armed_cruise_force_relock_source_rate_ok{false};
   };
@@ -3866,6 +4368,7 @@ private:
     bool velocity_residual_boost_active{false};
     bool position_override_active{false};
     bool position_residual_boost_active{false};
+    bool position_lag_compensation_active{false};
     bool vertical_cov_reopen_active{false};
     bool vertical_cov_reopen_applied{false};
     bool post_flight_vertical_cov_reopen_active{false};
@@ -3876,11 +4379,21 @@ private:
     bool post_turn_context{false};
     bool armed_cruise_context{false};
     bool native_velocity_tightening_context{false};
+    bool terminal_descent_context{false};
+    bool terminal_descent_native_velocity_override_active{false};
+    bool terminal_descent_horizontal_zero_velocity_active{false};
+    bool terminal_descent_horizontal_zero_velocity_applied{false};
+    bool terminal_descent_vertical_cov_reopen_active{false};
+    bool terminal_descent_vertical_cov_reopen_applied{false};
     bool medium_gap_active{false};
     bool medium_gap_segmented{false};
     bool medium_gap_conservative_single_step{false};
     double ros_time_sec{std::numeric_limits<double>::quiet_NaN()};
     double update_time_sec{std::numeric_limits<double>::quiet_NaN()};
+    double armed_time_sec{std::numeric_limits<double>::quiet_NaN()};
+    double latest_heading_update_age_sec{std::numeric_limits<double>::quiet_NaN()};
+    std::string mavros_mode;
+    std::string gnss_position_std_source_label{"unknown"};
     double last_position_residual_h_m{std::numeric_limits<double>::quiet_NaN()};
     double last_position_residual_u_m{std::numeric_limits<double>::quiet_NaN()};
     double last_velocity_residual_h_mps{std::numeric_limits<double>::quiet_NaN()};
@@ -3891,6 +4404,10 @@ private:
     double core_pos_std_d_m{std::numeric_limits<double>::quiet_NaN()};
     double core_vel_std_d_mps{std::numeric_limits<double>::quiet_NaN()};
     double core_accbias_std_z_mps2{std::numeric_limits<double>::quiet_NaN()};
+    double position_lag_compensation_sec{std::numeric_limits<double>::quiet_NaN()};
+    double position_lag_compensation_n_m{std::numeric_limits<double>::quiet_NaN()};
+    double position_lag_compensation_e_m{std::numeric_limits<double>::quiet_NaN()};
+    double position_lag_compensation_u_m{std::numeric_limits<double>::quiet_NaN()};
     double horizontal_speed_mps{std::numeric_limits<double>::quiet_NaN()};
     double vertical_speed_mps{std::numeric_limits<double>::quiet_NaN()};
     double gyro_deg_s{std::numeric_limits<double>::quiet_NaN()};
@@ -4095,6 +4612,33 @@ private:
       (heading_armed_cruise_force_relock_max_vertical_speed_mps_ <= 0.0 ||
        last_mavros_vertical_speed_mps_ <=
          heading_armed_cruise_force_relock_max_vertical_speed_mps_);
+    const bool terminal_descent_armed_time_ok =
+      terminal_descent_min_armed_time_sec_ <= 0.0 ||
+      (std::isfinite(last_armed_transition_time_sec_) &&
+       (now_sec - last_armed_transition_time_sec_) >= terminal_descent_min_armed_time_sec_);
+    const bool terminal_descent_gyro_ok =
+      !std::isfinite(last_imu_gyro_norm_deg_s_) ||
+      terminal_descent_max_gyro_deg_s_ <= 0.0 ||
+      last_imu_gyro_norm_deg_s_ <= terminal_descent_max_gyro_deg_s_;
+    const bool terminal_descent_source_rate_ok =
+      !std::isfinite(last_mavros_heading_rate_deg_s_) ||
+      terminal_descent_max_source_yaw_rate_deg_s_ <= 0.0 ||
+      std::abs(last_mavros_heading_rate_deg_s_) <=
+        terminal_descent_max_source_yaw_rate_deg_s_;
+    ctx.terminal_descent_mode_ok =
+      !terminal_descent_require_rtl_mode_ || isTerminalDescentFlightMode_();
+    ctx.terminal_descent_context =
+      terminal_descent_observation_enable_ &&
+      mavros_armed_ &&
+      ctx.have_fresh_mavros_speed &&
+      ctx.terminal_descent_mode_ok &&
+      terminal_descent_armed_time_ok &&
+      (terminal_descent_max_horizontal_speed_mps_ <= 0.0 ||
+       last_mavros_horizontal_speed_mps_ <= terminal_descent_max_horizontal_speed_mps_) &&
+      (terminal_descent_min_vertical_speed_mps_ <= 0.0 ||
+       last_mavros_vertical_speed_mps_ >= terminal_descent_min_vertical_speed_mps_) &&
+      terminal_descent_gyro_ok &&
+      terminal_descent_source_rate_ok;
     return ctx;
   }
 
@@ -4399,12 +4943,18 @@ private:
       << "pending_debug_matched,pending_native_velocity_valid,pending_native_velocity_used,"
       << "native_velocity_override_active,velocity_residual_boost_active,"
       << "position_override_active,position_residual_boost_active,"
+      << "position_lag_compensation_active,position_lag_compensation_sec,"
+      << "position_lag_compensation_n_m,position_lag_compensation_e_m,position_lag_compensation_u_m,"
       << "vertical_cov_reopen_active,vertical_cov_reopen_applied,"
       << "post_flight_vertical_cov_reopen_active,post_flight_vertical_cov_reopen_applied,"
+      << "terminal_descent_vertical_cov_reopen_active,terminal_descent_vertical_cov_reopen_applied,"
       << "last_position_residual_h_m,last_position_residual_u_m,last_velocity_residual_h_mps,last_velocity_residual_e_mps,last_velocity_residual_d_mps,"
       << "core_gnss_diff_h_m,core_gnss_diff_u_m,core_pos_std_d_m,core_vel_std_d_mps,core_accbias_std_z_mps2,"
       << "mavros_armed,have_fresh_speed,turning_now,"
       << "post_turn_context,armed_cruise_context,native_velocity_tightening_context,"
+      << "terminal_descent_context,terminal_descent_native_velocity_override_active,"
+      << "terminal_descent_horizontal_zero_velocity_active,"
+      << "terminal_descent_horizontal_zero_velocity_applied,"
       << "medium_gap_active,medium_gap_segmented,medium_gap_conservative_single_step,"
       << "horizontal_speed_mps,vertical_speed_mps,"
       << "gyro_deg_s,source_yaw_rate_deg_s,"
@@ -4419,6 +4969,182 @@ private:
       get_logger(),
       "GNSS update debug CSV enabled: %s",
       gnss_update_debug_csv_path_.c_str());
+  }
+
+  void openGnssNisDebugCsv_()
+  {
+    if (gnss_nis_debug_csv_path_.empty()) {
+      return;
+    }
+
+    try {
+      const std::filesystem::path csv_path(gnss_nis_debug_csv_path_);
+      if (csv_path.has_parent_path()) {
+        std::filesystem::create_directories(csv_path.parent_path());
+      }
+      gnss_nis_debug_csv_.open(csv_path, std::ios::out | std::ios::trunc);
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Failed to open GNSS NIS debug CSV %s: %s",
+        gnss_nis_debug_csv_path_.c_str(),
+        e.what());
+      return;
+    }
+
+    if (!gnss_nis_debug_csv_.is_open()) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Failed to open GNSS NIS debug CSV %s",
+        gnss_nis_debug_csv_path_.c_str());
+      return;
+    }
+
+    gnss_nis_debug_csv_
+      << "sequence,ros_time_sec,update_time_sec,armed_time_sec,mavros_mode,mavros_armed,"
+      << "update_mode,update_mode_label,pending_debug_matched,"
+      << "turning_now,post_turn_context,armed_cruise_context,terminal_descent_context,"
+      << "gnss_position_residual_n_m,gnss_position_residual_e_m,gnss_position_residual_u_m,"
+      << "gnss_position_residual_h_m,"
+      << "gnss_position_std_n_m,gnss_position_std_e_m,gnss_position_std_u_m,"
+      << "gnss_position_std_source_label,"
+      << "gnss_position_s_nn_m2,gnss_position_s_ne_m2,gnss_position_s_nu_m2,"
+      << "gnss_position_s_ee_m2,gnss_position_s_eu_m2,gnss_position_s_uu_m2,"
+      << "gnss_position_nis_h_2d,gnss_position_nis_u_1d,gnss_position_nis_3d,"
+      << "gnss_position_gate_threshold_nis,"
+      << "gnss_position_update_accepted,gnss_position_update_rejected,"
+      << "gnss_position_update_reason,position_override_active,position_residual_boost_active,"
+      << "pos_cov_n_m2,pos_cov_e_m2,pos_cov_u_m2,"
+      << "vel_cov_n_m2ps2,vel_cov_e_m2ps2,vel_cov_d_m2ps2,"
+      << "core_gnss_diff_h_m,core_gnss_diff_u_m,"
+      << "horizontal_speed_mps,vertical_speed_mps,gyro_deg_s,source_yaw_rate_deg_s,"
+      << "latest_heading_update_age_sec\n";
+    gnss_nis_debug_csv_.flush();
+
+    RCLCPP_INFO(
+      get_logger(),
+      "GNSS NIS debug CSV enabled: %s (max_rate=%.3f Hz)",
+      gnss_nis_debug_csv_path_.c_str(),
+      gnss_nis_debug_max_rate_hz_);
+  }
+
+  void logGnssNisDebugIfNeeded_()
+  {
+    if (!gnss_nis_debug_csv_.is_open() || !core_) {
+      return;
+    }
+
+    const kfcore::ObservationDebug debug = core_->lastObservationDebug();
+    if (!debug.valid || debug.sequence == 0 ||
+        debug.sequence == last_logged_gnss_nis_debug_sequence_) {
+      return;
+    }
+    last_logged_gnss_nis_debug_sequence_ = debug.sequence;
+
+    if (!debug.gnss_position_applied) {
+      return;
+    }
+
+    const double log_time_sec =
+      std::isfinite(debug.update_time_sec) ? debug.update_time_sec : now().seconds();
+    if (gnss_nis_debug_max_rate_hz_ > 0.0 &&
+        std::isfinite(last_gnss_nis_debug_log_update_time_sec_) &&
+        std::isfinite(log_time_sec)) {
+      const double min_period_sec = 1.0 / gnss_nis_debug_max_rate_hz_;
+      if ((log_time_sec - last_gnss_nis_debug_log_update_time_sec_) < min_period_sec) {
+        return;
+      }
+    }
+    last_gnss_nis_debug_log_update_time_sec_ = log_time_sec;
+
+    const bool pending_debug_matched =
+      pending_gnss_debug_context_.valid &&
+      std::isfinite(pending_gnss_debug_context_.update_time_sec) &&
+      std::isfinite(debug.update_time_sec) &&
+      std::abs(pending_gnss_debug_context_.update_time_sec - debug.update_time_sec) <= 1e-6;
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    auto pending_value = [&](double value) {
+      return pending_debug_matched ? value : nan;
+    };
+    auto pending_flag = [&](bool value) {
+      return (pending_debug_matched && value) ? 1 : 0;
+    };
+
+    double pos_cov_n_m2 = nan;
+    double pos_cov_e_m2 = nan;
+    double pos_cov_u_m2 = nan;
+    double vel_cov_n_m2ps2 = nan;
+    double vel_cov_e_m2ps2 = nan;
+    double vel_cov_d_m2ps2 = nan;
+    const Eigen::MatrixXd core_covariance = core_->covariance();
+    if (core_covariance.rows() >= 6 && core_covariance.cols() >= 6) {
+      auto cov_diag = [&](int idx) {
+        const double value = core_covariance(idx, idx);
+        return std::isfinite(value) ? value : nan;
+      };
+      pos_cov_n_m2 = cov_diag(0);
+      pos_cov_e_m2 = cov_diag(1);
+      pos_cov_u_m2 = cov_diag(2);
+      vel_cov_n_m2ps2 = cov_diag(3);
+      vel_cov_e_m2ps2 = cov_diag(4);
+      vel_cov_d_m2ps2 = cov_diag(5);
+    }
+
+    const double residual_h_m = std::hypot(
+      debug.gnss_position_residual_neu_m.x(),
+      debug.gnss_position_residual_neu_m.y());
+    const Eigen::Matrix3d & S = debug.gnss_position_innovation_cov_neu_m2;
+    static const std::string empty_csv_label{"unknown"};
+    const std::string & mode =
+      pending_debug_matched ? pending_gnss_debug_context_.mavros_mode : empty_csv_label;
+    const std::string & std_source =
+      pending_debug_matched ? pending_gnss_debug_context_.gnss_position_std_source_label
+                            : empty_csv_label;
+
+    gnss_nis_debug_csv_
+      << debug.sequence << ','
+      << pending_value(pending_gnss_debug_context_.ros_time_sec) << ','
+      << debug.update_time_sec << ','
+      << pending_value(pending_gnss_debug_context_.armed_time_sec) << ','
+      << (mode.empty() ? empty_csv_label : mode) << ','
+      << pending_flag(pending_gnss_debug_context_.armed) << ','
+      << debug.update_mode << ','
+      << observationUpdateModeLabel_(debug.update_mode) << ','
+      << (pending_debug_matched ? 1 : 0) << ','
+      << pending_flag(pending_gnss_debug_context_.turning_now) << ','
+      << pending_flag(pending_gnss_debug_context_.post_turn_context) << ','
+      << pending_flag(pending_gnss_debug_context_.armed_cruise_context) << ','
+      << pending_flag(pending_gnss_debug_context_.terminal_descent_context) << ','
+      << debug.gnss_position_residual_neu_m.x() << ','
+      << debug.gnss_position_residual_neu_m.y() << ','
+      << debug.gnss_position_residual_neu_m.z() << ','
+      << residual_h_m << ','
+      << debug.gnss_position_std_neu_m.x() << ','
+      << debug.gnss_position_std_neu_m.y() << ','
+      << debug.gnss_position_std_neu_m.z() << ','
+      << (std_source.empty() ? empty_csv_label : std_source) << ','
+      << S(0, 0) << ',' << S(0, 1) << ',' << S(0, 2) << ','
+      << S(1, 1) << ',' << S(1, 2) << ',' << S(2, 2) << ','
+      << debug.gnss_position_nis_h_2d << ','
+      << debug.gnss_position_nis_u_1d << ','
+      << debug.gnss_position_nis_3d << ','
+      << debug.gnss_position_gate_threshold_nis << ','
+      << (debug.gnss_position_update_accepted ? 1 : 0) << ','
+      << (debug.gnss_position_update_rejected ? 1 : 0) << ','
+      << debug.gnss_position_update_reason << ','
+      << pending_flag(pending_gnss_debug_context_.position_override_active) << ','
+      << pending_flag(pending_gnss_debug_context_.position_residual_boost_active) << ','
+      << pos_cov_n_m2 << ',' << pos_cov_e_m2 << ',' << pos_cov_u_m2 << ','
+      << vel_cov_n_m2ps2 << ',' << vel_cov_e_m2ps2 << ',' << vel_cov_d_m2ps2 << ','
+      << pending_value(pending_gnss_debug_context_.core_gnss_diff_h_m) << ','
+      << pending_value(pending_gnss_debug_context_.core_gnss_diff_u_m) << ','
+      << pending_value(pending_gnss_debug_context_.horizontal_speed_mps) << ','
+      << pending_value(pending_gnss_debug_context_.vertical_speed_mps) << ','
+      << pending_value(pending_gnss_debug_context_.gyro_deg_s) << ','
+      << pending_value(pending_gnss_debug_context_.source_yaw_rate_deg_s) << ','
+      << pending_value(pending_gnss_debug_context_.latest_heading_update_age_sec) << '\n';
+    gnss_nis_debug_csv_.flush();
   }
 
   void logObservationDebugIfNeeded_()
@@ -4465,10 +5191,17 @@ private:
       << ((pending_debug_matched && pending_gnss_debug_context_.velocity_residual_boost_active) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.position_override_active) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.position_residual_boost_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.position_lag_compensation_active) ? 1 : 0) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.position_lag_compensation_sec : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.position_lag_compensation_n_m : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.position_lag_compensation_e_m : std::numeric_limits<double>::quiet_NaN()) << ','
+      << (pending_debug_matched ? pending_gnss_debug_context_.position_lag_compensation_u_m : std::numeric_limits<double>::quiet_NaN()) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.vertical_cov_reopen_active) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.vertical_cov_reopen_applied) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.post_flight_vertical_cov_reopen_active) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.post_flight_vertical_cov_reopen_applied) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.terminal_descent_vertical_cov_reopen_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.terminal_descent_vertical_cov_reopen_applied) ? 1 : 0) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.last_position_residual_h_m : std::numeric_limits<double>::quiet_NaN()) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.last_position_residual_u_m : std::numeric_limits<double>::quiet_NaN()) << ','
       << (pending_debug_matched ? pending_gnss_debug_context_.last_velocity_residual_h_mps : std::numeric_limits<double>::quiet_NaN()) << ','
@@ -4485,6 +5218,10 @@ private:
       << ((pending_debug_matched && pending_gnss_debug_context_.post_turn_context) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.armed_cruise_context) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.native_velocity_tightening_context) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.terminal_descent_context) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.terminal_descent_native_velocity_override_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.terminal_descent_horizontal_zero_velocity_active) ? 1 : 0) << ','
+      << ((pending_debug_matched && pending_gnss_debug_context_.terminal_descent_horizontal_zero_velocity_applied) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.medium_gap_active) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.medium_gap_segmented) ? 1 : 0) << ','
       << ((pending_debug_matched && pending_gnss_debug_context_.medium_gap_conservative_single_step) ? 1 : 0) << ','
@@ -4626,6 +5363,10 @@ private:
   double imu_gap_warn_ms_{60.0};
   double path_rate_hz_{5.0};
   int    pose_decimation_{10};
+  int    raw_odom_decimation_{50};
+  bool   core_processing_enable_{true};
+  int    core_imu_decimation_{1};
+  double core_max_imu_rate_hz_{0.0};
   int    max_path_pts_{20000};
   bool   use_gnss_llh_for_pose_{true};
   bool   use_gnss_llh_for_pose_when_disarmed_{true};
@@ -4641,6 +5382,12 @@ private:
   double sim_gnss_std_h_m_{0.1};  // 【修复】仿真水平std
   double sim_gnss_std_u_m_{0.2};  // 【修复】仿真竖直std
   double gnss_min_std_m_{0.5};
+  bool gnss_position_lag_compensation_enable_{false};
+  bool gnss_position_lag_compensation_armed_only_{true};
+  bool logged_gnss_position_lag_compensation_{false};
+  double gnss_position_lag_compensation_sec_{0.25};
+  double gnss_position_lag_compensation_max_sec_{0.50};
+  double gnss_position_lag_compensation_min_speed_mps_{0.50};
 
   // 预热/启画控制
   double start_after_gnss_sec_{1.0};
@@ -4657,6 +5404,7 @@ private:
   bool path_require_armed_{false};
   bool clear_path_on_arm_transition_{false};
   bool mavros_armed_{false};
+  std::string mavros_mode_;
   bool have_completed_armed_flight_since_reset_{false};
   double last_armed_transition_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_disarmed_transition_time_sec_{std::numeric_limits<double>::quiet_NaN()};
@@ -4673,6 +5421,8 @@ private:
   bool have_mavros_tilt_{false};
   bool have_native_sensor_gps_velocity_{false};
   bool warned_vehicle_odometry_velocity_frame_{false};
+  bool reported_core_processing_disabled_imu_{false};
+  bool reported_core_processing_disabled_gnss_{false};
   double prev_mavros_heading_sample_deg_{0.0};
   double prev_mavros_heading_sample_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   double last_mavros_heading_rate_deg_s_{std::numeric_limits<double>::quiet_NaN()};
@@ -4693,9 +5443,11 @@ private:
   double last_native_sensor_gps_velocity_rx_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   PendingGnssDebugContext pending_gnss_debug_context_{};
   std::ofstream gnss_update_debug_csv_;
+  std::ofstream gnss_nis_debug_csv_;
   std::ofstream heading_update_debug_csv_;
   std::ofstream state_publish_debug_csv_;
   std::uint64_t last_logged_observation_debug_sequence_{0};
+  std::uint64_t last_logged_gnss_nis_debug_sequence_{0};
   std::uint64_t heading_update_debug_sequence_{0};
   std::uint64_t state_publish_debug_sequence_{0};
   std::size_t gnss_update_debug_rows_since_flush_{0};
@@ -4748,11 +5500,32 @@ private:
   double post_flight_vertical_cov_reopen_pos_std_m_{0.25};
   double post_flight_vertical_cov_reopen_vel_std_mps_{0.10};
   double post_flight_vertical_cov_reopen_accbias_std_z_mps2_{0.05};
+  bool terminal_descent_observation_enable_{false};
+  bool terminal_descent_require_rtl_mode_{true};
+  double terminal_descent_max_horizontal_speed_mps_{1.6};
+  double terminal_descent_min_vertical_speed_mps_{0.30};
+  double terminal_descent_max_gyro_deg_s_{30.0};
+  double terminal_descent_max_source_yaw_rate_deg_s_{30.0};
+  double terminal_descent_min_armed_time_sec_{0.0};
+  bool terminal_descent_native_gnss_vel_override_enable_{true};
+  double terminal_descent_native_gnss_vel_std_h_mps_{0.03};
+  double terminal_descent_native_gnss_vel_std_u_mps_{0.05};
+  bool terminal_descent_vertical_cov_reopen_enable_{true};
+  double terminal_descent_vertical_cov_reopen_pos_std_m_{0.15};
+  double terminal_descent_vertical_cov_reopen_vel_std_mps_{0.05};
+  double terminal_descent_vertical_cov_reopen_accbias_std_z_mps2_{0.05};
+  bool terminal_descent_horizontal_zero_vel_enable_{false};
+  double terminal_descent_horizontal_zero_vel_max_hspeed_mps_{0.30};
+  double terminal_descent_horizontal_zero_vel_std_h_mps_{0.05};
+  double terminal_descent_horizontal_zero_vel_std_u_mps_{10.0};
   double armed_cruise_gnss_pos_residual_boost_until_sec_{std::numeric_limits<double>::quiet_NaN()};
   double armed_cruise_native_gnss_vel_residual_boost_until_sec_{std::numeric_limits<double>::quiet_NaN()};
   double armed_cruise_vertical_cov_reopen_until_sec_{std::numeric_limits<double>::quiet_NaN()};
   double post_flight_vertical_cov_reopen_until_sec_{std::numeric_limits<double>::quiet_NaN()};
   std::string gnss_update_debug_csv_path_;
+  std::string gnss_nis_debug_csv_path_;
+  double gnss_nis_debug_max_rate_hz_{2.0};
+  double last_gnss_nis_debug_log_update_time_sec_{std::numeric_limits<double>::quiet_NaN()};
   std::string heading_update_debug_csv_path_;
   std::string state_publish_debug_csv_path_;
   bool use_online_reset_covariance_{true};
@@ -4771,6 +5544,18 @@ private:
   double heading_update_source_jump_gate_deg_{20.0};
   double heading_update_source_jump_block_sec_{2.0};
   double heading_update_hard_innovation_gate_deg_{15.0};
+  bool heading_track_validity_gate_enable_{false};
+  std::string heading_track_validity_gate_action_{"inflate"};
+  bool heading_track_validity_gate_apply_to_update_{true};
+  bool heading_track_validity_gate_apply_to_turn_track_{false};
+  bool heading_track_validity_gate_apply_to_post_turn_{true};
+  double heading_track_validity_gate_after_turn_sec_{20.0};
+  double heading_track_validity_gate_min_horizontal_speed_mps_{3.0};
+  double heading_track_validity_gate_max_vertical_speed_mps_{1.2};
+  double heading_track_validity_gate_max_gyro_deg_s_{6.0};
+  double heading_track_validity_gate_max_source_yaw_rate_deg_s_{1.0};
+  double heading_track_validity_gate_max_residual_deg_{2.0};
+  double heading_track_validity_gate_inflated_std_deg_{25.0};
   bool heading_post_turn_reacquire_enable_{true};
   double heading_post_turn_reacquire_window_sec_{2.0};
   double heading_post_turn_reacquire_max_residual_deg_{45.0};
@@ -4905,6 +5690,15 @@ private:
   bool last_medium_imu_gap_segmented_{false};
   bool last_medium_imu_gap_conservative_single_step_{false};
   int last_medium_imu_gap_segmented_steps_{1};
+  bool have_core_imu_accumulator_{false};
+  bool core_imu_accum_feed_delta_{false};
+  double core_imu_accum_dt_sec_{0.0};
+  Eigen::Vector3d core_imu_accum_dtheta_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d core_imu_accum_dvel_{Eigen::Vector3d::Zero()};
+  double last_core_imu_rate_limit_process_steady_sec_{std::numeric_limits<double>::quiet_NaN()};
+  std::uint64_t core_imu_rate_limit_input_count_{0};
+  std::uint64_t core_imu_rate_limit_skip_count_{0};
+  std::uint64_t core_imu_rate_limit_process_count_{0};
 
 
   // ---- core ----
@@ -5014,6 +5808,7 @@ private:
 
   // decimation 计数器
   int dec_{0};
+  std::uint64_t raw_odom_publish_counter_{0};
 };
 
 std::shared_ptr<rclcpp::Node> make_node()

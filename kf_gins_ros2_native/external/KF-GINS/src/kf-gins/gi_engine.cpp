@@ -204,6 +204,19 @@ void GIEngine::beginObservationDebug(int update_mode, double update_time_sec) {
         Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
     last_observation_debug_.gnss_position_std_neu_m =
         Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    last_observation_debug_.gnss_position_innovation_cov_neu_m2 =
+        Eigen::Matrix3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    last_observation_debug_.gnss_position_nis_h_2d =
+        std::numeric_limits<double>::quiet_NaN();
+    last_observation_debug_.gnss_position_nis_u_1d =
+        std::numeric_limits<double>::quiet_NaN();
+    last_observation_debug_.gnss_position_nis_3d =
+        std::numeric_limits<double>::quiet_NaN();
+    last_observation_debug_.gnss_position_gate_threshold_nis =
+        std::numeric_limits<double>::quiet_NaN();
+    last_observation_debug_.gnss_position_update_accepted = false;
+    last_observation_debug_.gnss_position_update_rejected = false;
+    last_observation_debug_.gnss_position_update_reason = "not_available";
     last_observation_debug_.gnss_velocity_residual_ned_mps =
         Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
     last_observation_debug_.gnss_velocity_std_ned_mps =
@@ -391,10 +404,43 @@ void GIEngine::gnssUpdate(GNSS &gnssdata) {
     };
     Eigen::MatrixXd dz_prefit, H_prefit;
     meas_model(pvacur_, imuerror_, dz_prefit, H_prefit);
+    const Eigen::MatrixXd S_prefit = H_prefit * Cov_ * H_prefit.transpose() + R_gnsspos_;
+    auto compute_nis = [](const Eigen::MatrixXd &S, const Eigen::MatrixXd &r) {
+        if (S.rows() != S.cols() || S.rows() != r.rows() || r.cols() != 1) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        const auto ldlt = S.ldlt();
+        if (ldlt.info() != Eigen::Success) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        const Eigen::MatrixXd solved = ldlt.solve(r);
+        if (solved.rows() != r.rows() || solved.cols() != 1 || !solved.allFinite()) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        const double nis = (r.transpose() * solved)(0, 0);
+        return std::isfinite(nis) ? nis : std::numeric_limits<double>::quiet_NaN();
+    };
     last_observation_debug_.gnss_position_applied = true;
     last_observation_debug_.gnss_position_residual_neu_m = dz_prefit.col(0);
     last_observation_debug_.gnss_position_std_neu_m =
         R_gnsspos_.diagonal().cwiseMax(0.0).cwiseSqrt();
+    last_observation_debug_.gnss_position_innovation_cov_neu_m2 = S_prefit;
+    last_observation_debug_.gnss_position_nis_h_2d =
+        compute_nis(S_prefit.topLeftCorner(2, 2), dz_prefit.topRows(2));
+    if (S_prefit.rows() >= 3 && S_prefit.cols() >= 3 && dz_prefit.rows() >= 3) {
+        const double s_uu = S_prefit(2, 2);
+        const double r_u = dz_prefit(2, 0);
+        last_observation_debug_.gnss_position_nis_u_1d =
+            (std::isfinite(s_uu) && s_uu > 0.0 && std::isfinite(r_u))
+                ? (r_u * r_u / s_uu)
+                : std::numeric_limits<double>::quiet_NaN();
+    }
+    last_observation_debug_.gnss_position_nis_3d = compute_nis(S_prefit, dz_prefit);
+    last_observation_debug_.gnss_position_gate_threshold_nis =
+        std::numeric_limits<double>::quiet_NaN();
+    last_observation_debug_.gnss_position_update_accepted = true;
+    last_observation_debug_.gnss_position_update_rejected = false;
+    last_observation_debug_.gnss_position_update_reason = "accepted_no_gnss_gate";
     IEKFUpdate(meas_model, R_gnsspos_, Cov_);
 
     // GNSS更新之后设置为不可用

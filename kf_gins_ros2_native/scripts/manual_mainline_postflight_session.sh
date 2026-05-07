@@ -73,10 +73,50 @@ PX4_SAFE_GCS_TARGET_RATE_HZ=${PX4_SAFE_GCS_TARGET_RATE_HZ}
 PX4_SAFE_GCS_SERVO_RATE_HZ=${PX4_SAFE_GCS_SERVO_RATE_HZ}
 PX4_SAFE_GCS_RC_RATE_HZ=${PX4_SAFE_GCS_RC_RATE_HZ}
 PX4_SAFE_GCS_FLOW_RATE_HZ=${PX4_SAFE_GCS_FLOW_RATE_HZ}
+PX4_SAFE_COMPARE_KF_GINS_PARAM_FILE=${PX4_SAFE_COMPARE_KF_GINS_PARAM_FILE}
+PX4_SAFE_COMPARE_ENABLE_REAL_TIME=${PX4_SAFE_COMPARE_ENABLE_REAL_TIME}
 PX4_SAFE_COMPARE_CSV_PATH=${PX4_SAFE_COMPARE_CSV_PATH}
+PX4_SAFE_COMPARE_IEKF_RAW_TOPIC=${PX4_SAFE_COMPARE_IEKF_RAW_TOPIC}
+PX4_SAFE_COMPARE_COMPUTE_RAW_METRICS=${PX4_SAFE_COMPARE_COMPUTE_RAW_METRICS}
+PX4_SAFE_COMPARE_RAW_CALLBACK_MODE=${PX4_SAFE_COMPARE_RAW_CALLBACK_MODE}
 PX4_SAFE_COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH=${PX4_SAFE_COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH}
+PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_CSV_PATH=${PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_CSV_PATH}
+PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_MAX_RATE_HZ=${PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_MAX_RATE_HZ}
 PX4_SAFE_COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH=${PX4_SAFE_COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH}
 PX4_SAFE_COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH=${PX4_SAFE_COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH}
+PX4_SAFE_COMPARE_RAW_ODOM_DECIMATION=${PX4_SAFE_COMPARE_RAW_ODOM_DECIMATION}
+PX4_SAFE_COMPARE_PATH_PUBLISH_RATE_HZ=${PX4_SAFE_COMPARE_PATH_PUBLISH_RATE_HZ}
+PX4_SAFE_COMPARE_POSE_DECIMATION=${PX4_SAFE_COMPARE_POSE_DECIMATION}
+PX4_SAFE_COMPARE_MAX_PATH_POINTS=${PX4_SAFE_COMPARE_MAX_PATH_POINTS}
+PX4_SAFE_COMPARE_CORE_PROCESSING_ENABLE=${PX4_SAFE_COMPARE_CORE_PROCESSING_ENABLE}
+PX4_SAFE_COMPARE_CORE_IMU_DECIMATION=${PX4_SAFE_COMPARE_CORE_IMU_DECIMATION}
+PX4_SAFE_COMPARE_CORE_MAX_IMU_RATE_HZ=${PX4_SAFE_COMPARE_CORE_MAX_IMU_RATE_HZ}
+PX4_SAFE_COMPARE_EKF2_USE_INPUT_STAMP=${PX4_SAFE_COMPARE_EKF2_USE_INPUT_STAMP}
+PX4_SAFE_COMPARE_GNSS_RELAY_MODE=${PX4_SAFE_COMPARE_GNSS_RELAY_MODE}
+PX4_SAFE_COMPARE_ENABLE_GNSS_RELAY=${PX4_SAFE_COMPARE_ENABLE_GNSS_RELAY}
+PX4_SAFE_COMPARE_GNSS_RELAY_SUBSCRIBE_ENABLE=${PX4_SAFE_COMPARE_GNSS_RELAY_SUBSCRIBE_ENABLE}
+PX4_SAFE_COMPARE_GNSS_RELAY_PUBLISH_ENABLE=${PX4_SAFE_COMPARE_GNSS_RELAY_PUBLISH_ENABLE}
+PX4_SAFE_COMPARE_ENABLE_GPS_DROPZONES=${PX4_SAFE_COMPARE_ENABLE_GPS_DROPZONES}
+PX4_SAFE_COMPARE_INJECT_DROPZONE_GPS_TO_PX4=${PX4_SAFE_COMPARE_INJECT_DROPZONE_GPS_TO_PX4}
+PX4_SAFE_COMPARE_PX4_GPS_INJECTION_MODE=${PX4_SAFE_COMPARE_PX4_GPS_INJECTION_MODE}
+PX4_SAFE_COMPARE_PX4_SET_PARAMS=${PX4_SAFE_COMPARE_PX4_SET_PARAMS}
+PX4_SAFE_COMPARE_ENABLE_EKF2_RELAY=${PX4_SAFE_COMPARE_ENABLE_EKF2_RELAY}
+PX4_SAFE_COMPARE_ENABLE_KF_GINS=${PX4_SAFE_COMPARE_ENABLE_KF_GINS}
+PX4_SAFE_COMPARE_ENABLE_STATIC_TF=${PX4_SAFE_COMPARE_ENABLE_STATIC_TF}
+PX4_SAFE_COMPARE_USE_SIM_GNSS_STD=${PX4_SAFE_COMPARE_USE_SIM_GNSS_STD}
+PX4_SAFE_COMPARE_SIM_GNSS_STD_H_M=${PX4_SAFE_COMPARE_SIM_GNSS_STD_H_M}
+PX4_SAFE_COMPARE_SIM_GNSS_STD_U_M=${PX4_SAFE_COMPARE_SIM_GNSS_STD_U_M}
+PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_ENABLE=${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_ENABLE}
+PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_SEC=${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_SEC}
+PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MAX_SEC=${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MAX_SEC}
+PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MIN_SPEED_MPS=${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MIN_SPEED_MPS}
+PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_OVERRIDE_ENABLE=${PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_OVERRIDE_ENABLE}
+PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_H_M=${PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_H_M}
+PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_U_M=${PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_U_M}
+PX4_SAFE_START_PAIR_LOGGER=${PX4_SAFE_START_PAIR_LOGGER}
+PX4_SAFE_PAIR_LOGGER_CSV_PATH=${PX4_SAFE_PAIR_LOGGER_CSV_PATH}
+PX4_SAFE_PAIR_LOGGER_RATE_HZ=${PX4_SAFE_PAIR_LOGGER_RATE_HZ}
+PX4_SAFE_PAIR_LOGGER_SYNC_TOLERANCE_MS=${PX4_SAFE_PAIR_LOGGER_SYNC_TOLERANCE_MS}
 PX4_SAFE_GPS_PROBE_CSV_PATH=${PX4_SAFE_GPS_PROBE_CSV_PATH}
 PX4_SAFE_GPS_PROBE_SECOND_CSV_PATH=${PX4_SAFE_GPS_PROBE_SECOND_CSV_PATH}
 PX4_SAFE_GPS_PROBE_PAIR_AFTER_NEWER_POSE=${PX4_SAFE_GPS_PROBE_PAIR_AFTER_NEWER_POSE}
@@ -87,24 +127,104 @@ EOF
 summarize_run() {
   local run_dir="$1"
   local gnss_csv="${run_dir}/gnss_update_debug.csv"
+  local gnss_nis_csv="${PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_CSV_PATH:-${run_dir}/gnss_nis_debug.csv}"
   local heading_csv="${run_dir}/heading_update_debug.csv"
   local state_publish_csv="${run_dir}/state_publish_debug.csv"
   local compare_csv="${run_dir}/comparison_metrics.csv"
+  local pair_csv="${run_dir}/ekf_iekf_pairs.csv"
   local gps_pose_csv="${run_dir}/gps_vs_pose.csv"
   local gps_raw_csv="${run_dir}/gps_vs_second_pose.csv"
 
   printf 'run_dir=%s\n' "${run_dir}"
   printf 'comparison_metrics_csv_present=%s\n' "$([[ -s "${compare_csv}" ]] && echo 1 || echo 0)"
+  printf 'ekf_iekf_pair_csv_present=%s\n' "$([[ -s "${pair_csv}" ]] && echo 1 || echo 0)"
   printf 'gnss_update_debug_csv_present=%s\n' "$([[ -s "${gnss_csv}" ]] && echo 1 || echo 0)"
+  printf 'gnss_nis_debug_csv_present=%s\n' "$([[ -s "${gnss_nis_csv}" ]] && echo 1 || echo 0)"
   printf 'heading_update_debug_csv_present=%s\n' "$([[ -s "${heading_csv}" ]] && echo 1 || echo 0)"
   printf 'state_publish_debug_csv_present=%s\n' "$([[ -s "${state_publish_csv}" ]] && echo 1 || echo 0)"
   printf 'gps_vs_pose_csv_present=%s\n' "$([[ -s "${gps_pose_csv}" ]] && echo 1 || echo 0)"
   printf 'gps_vs_second_pose_csv_present=%s\n' "$([[ -s "${gps_raw_csv}" ]] && echo 1 || echo 0)"
   printf 'comparison_metrics_rows=%s\n' "$(csv_rows "${compare_csv}")"
+  printf 'ekf_iekf_pair_rows=%s\n' "$(csv_rows "${pair_csv}")"
+  printf 'gnss_nis_debug_rows=%s\n' "$(csv_rows "${gnss_nis_csv}")"
   printf 'heading_update_debug_rows=%s\n' "$(csv_rows "${heading_csv}")"
   printf 'state_publish_debug_rows=%s\n' "$(csv_rows "${state_publish_csv}")"
   printf 'gps_vs_pose_rows=%s\n' "$(csv_rows "${gps_pose_csv}")"
   printf 'gps_vs_second_pose_rows=%s\n' "$(csv_rows "${gps_raw_csv}")"
+
+  if [[ -s "${pair_csv}" ]]; then
+    awk -F, '
+      function get(name,    idx) {
+        idx = header[name]
+        if (idx == 0) {
+          return ""
+        }
+        return $(idx)
+      }
+
+      function finite(value) {
+        return value != "" && value != "nan" && value != "-nan" && value != "inf" && value != "-inf"
+      }
+
+      function abs_num(value) {
+        return value < 0 ? -value : value
+      }
+
+      function add_metric(prefix, value) {
+        if (!finite(value)) {
+          return
+        }
+        sum[prefix] += value + 0.0
+        count[prefix] += 1
+        if (!(prefix in max) || value + 0.0 > max[prefix]) {
+          max[prefix] = value + 0.0
+        }
+      }
+
+      NR == 1 {
+        for (i = 1; i <= NF; ++i) {
+          gsub(/\r$/, "", $i)
+          header[$i] = i
+        }
+        next
+      }
+
+      {
+        rows += 1
+        if ((get("mavros_armed") + 0) != 0) {
+          armed_rows += 1
+          if ((get("alignment_ready") + 0) != 0) {
+            aligned_armed_rows += 1
+            add_metric("armed_position_error_xy_m", get("position_error_xy_m"))
+            add_metric("armed_position_error_norm_m", get("position_error_norm_m"))
+            add_metric("armed_velocity_error_norm_mps", get("velocity_error_norm_mps"))
+            add_metric("armed_abs_yaw_error_deg", abs_num(get("yaw_error_deg") + 0.0))
+          }
+        }
+        if ((get("alignment_ready") + 0) != 0) {
+          aligned_rows += 1
+          add_metric("position_error_xy_m", get("position_error_xy_m"))
+          add_metric("position_error_norm_m", get("position_error_norm_m"))
+          add_metric("velocity_error_norm_mps", get("velocity_error_norm_mps"))
+          add_metric("abs_yaw_error_deg", abs_num(get("yaw_error_deg") + 0.0))
+          add_metric("abs_sync_dt_ms", abs_num(get("sync_dt_ms") + 0.0))
+        }
+      }
+
+      END {
+        print "ekf_iekf_pair_rows_seen=" (rows + 0)
+        print "ekf_iekf_pair_aligned_rows=" (aligned_rows + 0)
+        print "ekf_iekf_pair_armed_rows=" (armed_rows + 0)
+        print "ekf_iekf_pair_aligned_armed_rows=" (aligned_armed_rows + 0)
+        for (key in count) {
+          if (count[key] > 0) {
+            printf "ekf_iekf_pair_%s_mean=%.4f\n", key, sum[key] / count[key]
+            printf "ekf_iekf_pair_%s_max=%.4f\n", key, max[key]
+          }
+        }
+      }
+    ' "${pair_csv}" | sort
+  fi
 
   if [[ -s "${gps_raw_csv}" ]]; then
     awk -F, '
@@ -343,6 +463,14 @@ summarize_run() {
       }
       have_postflight_active = ("post_flight_vertical_cov_reopen_active" in header)
       have_postflight_applied = ("post_flight_vertical_cov_reopen_applied" in header)
+      have_lag_comp_active = ("position_lag_compensation_active" in header)
+      have_lag_comp_sec = ("position_lag_compensation_sec" in header)
+      have_lag_comp_n = ("position_lag_compensation_n_m" in header)
+      have_lag_comp_e = ("position_lag_compensation_e_m" in header)
+      have_lag_comp_u = ("position_lag_compensation_u_m" in header)
+      have_terminal_context = ("terminal_descent_context" in header)
+      have_terminal_hzero_active = ("terminal_descent_horizontal_zero_velocity_active" in header)
+      have_terminal_hzero_applied = ("terminal_descent_horizontal_zero_velocity_applied" in header)
       next
     }
 
@@ -358,6 +486,68 @@ summarize_run() {
       armed = armed_raw + 0
       ros = ros_raw + 0
       seq = seq_raw + 0
+
+      if (have_lag_comp_active) {
+        lag_comp_active = get("position_lag_compensation_active")
+        if (!is_nan(lag_comp_active) && (lag_comp_active + 0) != 0) {
+          lag_comp_active_rows += 1
+          if (armed != 0) {
+            lag_comp_armed_active_rows += 1
+          }
+          if (have_lag_comp_sec) {
+            lag_comp_sec = get("position_lag_compensation_sec")
+            if (!is_nan(lag_comp_sec)) {
+              lag_comp_sec_sum += lag_comp_sec + 0.0
+              lag_comp_sec_count += 1
+            }
+          }
+          if (have_lag_comp_n && have_lag_comp_e) {
+            lag_comp_n = get("position_lag_compensation_n_m")
+            lag_comp_e = get("position_lag_compensation_e_m")
+            if (!is_nan(lag_comp_n) && !is_nan(lag_comp_e)) {
+              lag_comp_h_sum += sqrt((lag_comp_n + 0.0) * (lag_comp_n + 0.0) + (lag_comp_e + 0.0) * (lag_comp_e + 0.0))
+              lag_comp_h_count += 1
+            }
+          }
+          if (have_lag_comp_u) {
+            lag_comp_u = get("position_lag_compensation_u_m")
+            if (!is_nan(lag_comp_u)) {
+              lag_comp_abs_u_sum += abs_num(lag_comp_u + 0.0)
+              lag_comp_abs_u_count += 1
+            }
+          }
+        }
+      }
+
+      if (have_terminal_context) {
+        terminal_context = get("terminal_descent_context")
+        if (!is_nan(terminal_context) && (terminal_context + 0) != 0) {
+          terminal_context_rows += 1
+          if (armed != 0) {
+            terminal_context_armed_rows += 1
+          }
+        }
+      }
+
+      if (have_terminal_hzero_active) {
+        terminal_hzero_active = get("terminal_descent_horizontal_zero_velocity_active")
+        if (!is_nan(terminal_hzero_active) && (terminal_hzero_active + 0) != 0) {
+          terminal_hzero_active_rows += 1
+          if (armed != 0) {
+            terminal_hzero_armed_active_rows += 1
+          }
+        }
+      }
+
+      if (have_terminal_hzero_applied) {
+        terminal_hzero_applied = get("terminal_descent_horizontal_zero_velocity_applied")
+        if (!is_nan(terminal_hzero_applied) && (terminal_hzero_applied + 0) != 0) {
+          terminal_hzero_applied_rows += 1
+          if (armed != 0) {
+            terminal_hzero_armed_applied_rows += 1
+          }
+        }
+      }
 
       if (!have_prev_armed) {
         prev_armed = armed
@@ -461,6 +651,32 @@ summarize_run() {
       print "post_flight_vertical_cov_reopen_applied_rows=" (postflight_applied_rows + 0)
       print "combined_vertical_cov_reopen_active_rows=" (combined_vertical_active_rows + 0)
       print "combined_vertical_cov_reopen_applied_rows=" (combined_vertical_applied_rows + 0)
+      print "gnss_position_lag_compensation_columns_present=" ((have_lag_comp_active && have_lag_comp_sec && have_lag_comp_n && have_lag_comp_e && have_lag_comp_u) ? 1 : 0)
+      print "gnss_position_lag_compensation_active_rows=" (lag_comp_active_rows + 0)
+      print "gnss_position_lag_compensation_armed_active_rows=" (lag_comp_armed_active_rows + 0)
+      print "terminal_descent_context_columns_present=" (have_terminal_context ? 1 : 0)
+      print "terminal_descent_context_rows=" (terminal_context_rows + 0)
+      print "terminal_descent_context_armed_rows=" (terminal_context_armed_rows + 0)
+      print "terminal_descent_horizontal_zero_velocity_columns_present=" ((have_terminal_hzero_active && have_terminal_hzero_applied) ? 1 : 0)
+      print "terminal_descent_horizontal_zero_velocity_active_rows=" (terminal_hzero_active_rows + 0)
+      print "terminal_descent_horizontal_zero_velocity_applied_rows=" (terminal_hzero_applied_rows + 0)
+      print "terminal_descent_horizontal_zero_velocity_armed_active_rows=" (terminal_hzero_armed_active_rows + 0)
+      print "terminal_descent_horizontal_zero_velocity_armed_applied_rows=" (terminal_hzero_armed_applied_rows + 0)
+      if (lag_comp_sec_count > 0) {
+        printf("gnss_position_lag_compensation_mean_sec=%.4f\n", lag_comp_sec_sum / lag_comp_sec_count)
+      } else {
+        print "gnss_position_lag_compensation_mean_sec="
+      }
+      if (lag_comp_h_count > 0) {
+        printf("gnss_position_lag_compensation_mean_h_m=%.4f\n", lag_comp_h_sum / lag_comp_h_count)
+      } else {
+        print "gnss_position_lag_compensation_mean_h_m="
+      }
+      if (lag_comp_abs_u_count > 0) {
+        printf("gnss_position_lag_compensation_mean_abs_u_m=%.4f\n", lag_comp_abs_u_sum / lag_comp_abs_u_count)
+      } else {
+        print "gnss_position_lag_compensation_mean_abs_u_m="
+      }
 
       if (postflight_core_gnss_diff_u_count > 0) {
         printf("postflight_mean_abs_core_gnss_diff_u_m=%.4f\n", postflight_core_gnss_diff_u_sum / postflight_core_gnss_diff_u_count)
@@ -677,10 +893,50 @@ export PX4_SAFE_GCS_TARGET_RATE_HZ="${PX4_SAFE_GCS_TARGET_RATE_HZ:-5}"
 export PX4_SAFE_GCS_SERVO_RATE_HZ="${PX4_SAFE_GCS_SERVO_RATE_HZ:-0}"
 export PX4_SAFE_GCS_RC_RATE_HZ="${PX4_SAFE_GCS_RC_RATE_HZ:-0}"
 export PX4_SAFE_GCS_FLOW_RATE_HZ="${PX4_SAFE_GCS_FLOW_RATE_HZ:-0}"
+export PX4_SAFE_COMPARE_KF_GINS_PARAM_FILE="${PX4_SAFE_COMPARE_KF_GINS_PARAM_FILE:-${WS_ROOT}/src/kf_gins_ros2_native/config/kfgins_sim_fixed.yaml}"
+export PX4_SAFE_COMPARE_ENABLE_REAL_TIME="${PX4_SAFE_COMPARE_ENABLE_REAL_TIME:-false}"
 export PX4_SAFE_COMPARE_CSV_PATH="${PX4_SAFE_COMPARE_CSV_PATH:-${RUN_DIR}/comparison_metrics.csv}"
+export PX4_SAFE_COMPARE_IEKF_RAW_TOPIC="${PX4_SAFE_COMPARE_IEKF_RAW_TOPIC-__disabled__}"
+export PX4_SAFE_COMPARE_COMPUTE_RAW_METRICS="${PX4_SAFE_COMPARE_COMPUTE_RAW_METRICS:-false}"
+export PX4_SAFE_COMPARE_RAW_CALLBACK_MODE="${PX4_SAFE_COMPARE_RAW_CALLBACK_MODE:-store}"
 export PX4_SAFE_COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH:-${RUN_DIR}/gnss_update_debug.csv}"
+export PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_CSV_PATH:-}"
+export PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_MAX_RATE_HZ="${PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_MAX_RATE_HZ:-2.0}"
 export PX4_SAFE_COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH:-${RUN_DIR}/heading_update_debug.csv}"
 export PX4_SAFE_COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH:-${RUN_DIR}/state_publish_debug.csv}"
+export PX4_SAFE_COMPARE_RAW_ODOM_DECIMATION="${PX4_SAFE_COMPARE_RAW_ODOM_DECIMATION:-50}"
+export PX4_SAFE_COMPARE_PATH_PUBLISH_RATE_HZ="${PX4_SAFE_COMPARE_PATH_PUBLISH_RATE_HZ:-5.0}"
+export PX4_SAFE_COMPARE_POSE_DECIMATION="${PX4_SAFE_COMPARE_POSE_DECIMATION:-5}"
+export PX4_SAFE_COMPARE_MAX_PATH_POINTS="${PX4_SAFE_COMPARE_MAX_PATH_POINTS:-20000}"
+export PX4_SAFE_COMPARE_CORE_PROCESSING_ENABLE="${PX4_SAFE_COMPARE_CORE_PROCESSING_ENABLE:-true}"
+export PX4_SAFE_COMPARE_CORE_IMU_DECIMATION="${PX4_SAFE_COMPARE_CORE_IMU_DECIMATION:-1}"
+export PX4_SAFE_COMPARE_CORE_MAX_IMU_RATE_HZ="${PX4_SAFE_COMPARE_CORE_MAX_IMU_RATE_HZ:-0.0}"
+export PX4_SAFE_COMPARE_EKF2_USE_INPUT_STAMP="${PX4_SAFE_COMPARE_EKF2_USE_INPUT_STAMP:-true}"
+export PX4_SAFE_COMPARE_GNSS_RELAY_MODE="${PX4_SAFE_COMPARE_GNSS_RELAY_MODE:-px4_sensor_gps}"
+export PX4_SAFE_COMPARE_ENABLE_GNSS_RELAY="${PX4_SAFE_COMPARE_ENABLE_GNSS_RELAY:-true}"
+export PX4_SAFE_COMPARE_GNSS_RELAY_SUBSCRIBE_ENABLE="${PX4_SAFE_COMPARE_GNSS_RELAY_SUBSCRIBE_ENABLE:-true}"
+export PX4_SAFE_COMPARE_GNSS_RELAY_PUBLISH_ENABLE="${PX4_SAFE_COMPARE_GNSS_RELAY_PUBLISH_ENABLE:-true}"
+export PX4_SAFE_COMPARE_ENABLE_GPS_DROPZONES="${PX4_SAFE_COMPARE_ENABLE_GPS_DROPZONES:-false}"
+export PX4_SAFE_COMPARE_INJECT_DROPZONE_GPS_TO_PX4="${PX4_SAFE_COMPARE_INJECT_DROPZONE_GPS_TO_PX4:-true}"
+export PX4_SAFE_COMPARE_PX4_GPS_INJECTION_MODE="${PX4_SAFE_COMPARE_PX4_GPS_INJECTION_MODE:-hil_gps}"
+export PX4_SAFE_COMPARE_PX4_SET_PARAMS="${PX4_SAFE_COMPARE_PX4_SET_PARAMS:-true}"
+export PX4_SAFE_COMPARE_ENABLE_EKF2_RELAY="${PX4_SAFE_COMPARE_ENABLE_EKF2_RELAY:-true}"
+export PX4_SAFE_COMPARE_ENABLE_KF_GINS="${PX4_SAFE_COMPARE_ENABLE_KF_GINS:-true}"
+export PX4_SAFE_COMPARE_ENABLE_STATIC_TF="${PX4_SAFE_COMPARE_ENABLE_STATIC_TF:-true}"
+export PX4_SAFE_COMPARE_USE_SIM_GNSS_STD="${PX4_SAFE_COMPARE_USE_SIM_GNSS_STD:-true}"
+export PX4_SAFE_COMPARE_SIM_GNSS_STD_H_M="${PX4_SAFE_COMPARE_SIM_GNSS_STD_H_M:-0.08}"
+export PX4_SAFE_COMPARE_SIM_GNSS_STD_U_M="${PX4_SAFE_COMPARE_SIM_GNSS_STD_U_M:-0.10}"
+export PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_ENABLE="${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_ENABLE:-false}"
+export PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_SEC="${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_SEC:-0.25}"
+export PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MAX_SEC="${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MAX_SEC:-0.50}"
+export PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MIN_SPEED_MPS="${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MIN_SPEED_MPS:-0.50}"
+export PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_OVERRIDE_ENABLE="${PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_OVERRIDE_ENABLE:-true}"
+export PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_H_M="${PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_H_M:-0.06}"
+export PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_U_M="${PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_U_M:-0.08}"
+export PX4_SAFE_START_PAIR_LOGGER="${PX4_SAFE_START_PAIR_LOGGER:-0}"
+export PX4_SAFE_PAIR_LOGGER_CSV_PATH="${PX4_SAFE_PAIR_LOGGER_CSV_PATH:-${RUN_DIR}/ekf_iekf_pairs.csv}"
+export PX4_SAFE_PAIR_LOGGER_RATE_HZ="${PX4_SAFE_PAIR_LOGGER_RATE_HZ:-10}"
+export PX4_SAFE_PAIR_LOGGER_SYNC_TOLERANCE_MS="${PX4_SAFE_PAIR_LOGGER_SYNC_TOLERANCE_MS:-50}"
 export PX4_SAFE_GPS_PROBE_CSV_PATH="${PX4_SAFE_GPS_PROBE_CSV_PATH:-${RUN_DIR}/gps_vs_pose.csv}"
 export PX4_SAFE_GPS_PROBE_SECOND_CSV_PATH="${PX4_SAFE_GPS_PROBE_SECOND_CSV_PATH:-${RUN_DIR}/gps_vs_second_pose.csv}"
 export PX4_SAFE_GPS_PROBE_PAIR_AFTER_NEWER_POSE="${PX4_SAFE_GPS_PROBE_PAIR_AFTER_NEWER_POSE:-true}"

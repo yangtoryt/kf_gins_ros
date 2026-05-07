@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
+from pathlib import Path
 import sys
 import time
 from dataclasses import dataclass
@@ -548,10 +550,51 @@ def build_waypoint(item: MissionItem, is_current: bool) -> Waypoint:
     return wp
 
 
+def load_qgc_plan(path: str) -> List[MissionItem]:
+    plan_path = Path(path)
+    data = json.loads(plan_path.read_text())
+    mission_items = data.get("mission", {}).get("items", [])
+    if not mission_items:
+        raise RuntimeError(f"QGC plan has no mission items: {plan_path}")
+
+    loaded: List[MissionItem] = []
+    for idx, item in enumerate(mission_items, start=1):
+        if item.get("type", "SimpleItem") != "SimpleItem":
+            raise RuntimeError(f"unsupported non-SimpleItem in QGC plan at item {idx}")
+        params = item.get("params") or []
+        if len(params) < 7:
+            raise RuntimeError(f"QGC plan item {idx} has fewer than 7 params")
+        loaded.append(
+            MissionItem(
+                command=int(item["command"]),
+                frame=int(item["frame"]),
+                param1=float(params[0] or 0.0),
+                param2=float(params[1] or 0.0),
+                param3=float(params[2] or 0.0),
+                param4=float(params[3] or 0.0),
+                lat=float(params[4] or 0.0),
+                lon=float(params[5] or 0.0),
+                alt=float(params[6] or 0.0),
+            )
+        )
+
+    if loaded[0].command != 22:
+        raise RuntimeError(f"QGC plan first item must be MAV_CMD_NAV_TAKEOFF, got {loaded[0].command}")
+    return loaded
+
+
+def default_success_seq(mission: List[Waypoint]) -> Optional[int]:
+    for idx in range(len(mission) - 1, -1, -1):
+        if mission[idx].command != 20:
+            return idx
+    return None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Push a fixed MAVROS mission, arm, switch to AUTO.MISSION, and monitor execution."
+        description="Push a MAVROS mission, arm, switch to AUTO.MISSION, and monitor execution."
     )
+    parser.add_argument("--plan-file", default=None, help="optional QGroundControl .plan file to push instead of the built-in route")
     parser.add_argument("--mavros-ns", default="/mavros", help="MAVROS namespace, default: /mavros")
     parser.add_argument("--timeout", type=float, default=15.0, help="service/topic timeout in seconds")
     parser.add_argument("--arm-timeout", type=float, default=20.0, help="arming/mode switch timeout in seconds")
@@ -637,8 +680,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    mission = [build_waypoint(item, is_current=(idx == 0)) for idx, item in enumerate(QGC_ROUTE_APR15_50M)]
-    success_seq: Optional[int] = len(mission) - 2
+    mission_items = load_qgc_plan(args.plan_file) if args.plan_file else QGC_ROUTE_APR15_50M
+    mission = [build_waypoint(item, is_current=(idx == 0)) for idx, item in enumerate(mission_items)]
+    success_seq: Optional[int] = default_success_seq(mission)
 
     rclpy.init()
     node = MissionSmoke(args.mavros_ns, args.timeout)

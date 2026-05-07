@@ -28,6 +28,7 @@ START_MONITOR="${PX4_SAFE_START_MONITOR:-1}"
 START_COMPARE="${PX4_SAFE_START_COMPARE:-0}"
 START_PLOTJUGGLER="${PX4_SAFE_START_PLOTJUGGLER:-0}"
 START_GPS_PROBES="${PX4_SAFE_START_GPS_PROBES:-0}"
+START_PAIR_LOGGER="${PX4_SAFE_START_PAIR_LOGGER:-0}"
 
 PX4_GCS_LINK_PROFILE="${PX4_SAFE_GCS_LINK_PROFILE:-auto}"
 PX4_GCS_RATE_BPS="${PX4_SAFE_GCS_RATE_BPS:-800000}"
@@ -48,16 +49,36 @@ PX4_SAFE_MISSION_PREFLIGHT_TIMEOUT_SEC="${PX4_SAFE_MISSION_PREFLIGHT_TIMEOUT_SEC
 MAVROS_FCU_URL="${PX4_SAFE_MAVROS_FCU_URL:-udp://:14540@127.0.0.1:14557}"
 QGC_BIN="${PX4_SAFE_QGC_BIN:-${HOME}/QGroundControl-x86_64.AppImage}"
 COMPARE_IMU_SOURCE="${PX4_SAFE_COMPARE_IMU_SOURCE:-px4_sensor_combined}"
+COMPARE_KF_GINS_PARAM_FILE="${PX4_SAFE_COMPARE_KF_GINS_PARAM_FILE:-${WS_ROOT}/src/kf_gins_ros2_native/config/kfgins_sim_fixed.yaml}"
 COMPARE_RECORD_BAG="${PX4_SAFE_COMPARE_RECORD_BAG:-false}"
 COMPARE_START_RVIZ="${PX4_SAFE_COMPARE_START_RVIZ:-false}"
-COMPARE_ENABLE_REAL_TIME="${PX4_SAFE_COMPARE_ENABLE_REAL_TIME:-true}"
+COMPARE_ENABLE_REAL_TIME="${PX4_SAFE_COMPARE_ENABLE_REAL_TIME:-false}"
 COMPARE_SENSOR_COMBINED_TOPIC="${PX4_SAFE_COMPARE_SENSOR_COMBINED_TOPIC:-/fmu/out/sensor_combined}"
 # Keep interactive compare aligned with the automated minimal-mainline runtime unless
-# the caller explicitly overrides these env vars.
+# the caller explicitly overrides these env vars. Flight stability runs keep the
+# high-rate raw IEKF subscription out of real_time_comparison by default; raw
+# diagnostics are opt-in.
 COMPARE_GNSS_RELAY_MODE="${PX4_SAFE_COMPARE_GNSS_RELAY_MODE:-px4_sensor_gps}"
+COMPARE_ENABLE_GNSS_RELAY="${PX4_SAFE_COMPARE_ENABLE_GNSS_RELAY:-true}"
+COMPARE_GNSS_RELAY_SUBSCRIBE_ENABLE="${PX4_SAFE_COMPARE_GNSS_RELAY_SUBSCRIBE_ENABLE:-true}"
+COMPARE_GNSS_RELAY_PUBLISH_ENABLE="${PX4_SAFE_COMPARE_GNSS_RELAY_PUBLISH_ENABLE:-true}"
+COMPARE_ENABLE_GPS_DROPZONES="${PX4_SAFE_COMPARE_ENABLE_GPS_DROPZONES:-false}"
+COMPARE_INJECT_DROPZONE_GPS_TO_PX4="${PX4_SAFE_COMPARE_INJECT_DROPZONE_GPS_TO_PX4:-true}"
+COMPARE_PX4_GPS_INJECTION_MODE="${PX4_SAFE_COMPARE_PX4_GPS_INJECTION_MODE:-hil_gps}"
+COMPARE_PX4_SET_PARAMS="${PX4_SAFE_COMPARE_PX4_SET_PARAMS:-true}"
 COMPARE_GNSS_SOURCE="${PX4_SAFE_COMPARE_GNSS_SOURCE:-navsatfix}"
 COMPARE_ENABLE_PX4_AUX_STATE_RELAY="${PX4_SAFE_COMPARE_ENABLE_PX4_AUX_STATE_RELAY:-true}"
+COMPARE_ENABLE_EKF2_RELAY="${PX4_SAFE_COMPARE_ENABLE_EKF2_RELAY:-true}"
+COMPARE_ENABLE_KF_GINS="${PX4_SAFE_COMPARE_ENABLE_KF_GINS:-true}"
+COMPARE_ENABLE_STATIC_TF="${PX4_SAFE_COMPARE_ENABLE_STATIC_TF:-true}"
 COMPARE_EKF2_INPUT_MODE="${PX4_SAFE_COMPARE_EKF2_INPUT_MODE:-px4_vehicle_odometry}"
+COMPARE_EKF2_USE_INPUT_STAMP="${PX4_SAFE_COMPARE_EKF2_USE_INPUT_STAMP:-true}"
+COMPARE_IEKF_RAW_TOPIC="${PX4_SAFE_COMPARE_IEKF_RAW_TOPIC-__disabled__}"
+if [[ -z "${COMPARE_IEKF_RAW_TOPIC}" ]]; then
+  COMPARE_IEKF_RAW_TOPIC="__disabled__"
+fi
+COMPARE_COMPUTE_RAW_METRICS="${PX4_SAFE_COMPARE_COMPUTE_RAW_METRICS:-false}"
+COMPARE_RAW_CALLBACK_MODE="${PX4_SAFE_COMPARE_RAW_CALLBACK_MODE:-store}"
 COMPARE_HEADING_SOURCE="${PX4_SAFE_COMPARE_HEADING_SOURCE:-mavros_imu}"
 COMPARE_MAVROS_HEADING_TOPIC="${PX4_SAFE_COMPARE_MAVROS_HEADING_TOPIC:-/px4_aux/imu/data}"
 COMPARE_SPEED_SOURCE="${PX4_SAFE_COMPARE_SPEED_SOURCE:-mavros_local_velocity}"
@@ -77,8 +98,52 @@ COMPARE_ENABLE_GT_PATH="${PX4_SAFE_COMPARE_ENABLE_GT_PATH:-false}"
 COMPARE_ENABLE_IEKF_ALIGNED_PATH="${PX4_SAFE_COMPARE_ENABLE_IEKF_ALIGNED_PATH:-false}"
 COMPARE_CSV_PATH="${PX4_SAFE_COMPARE_CSV_PATH:-${RUN_DIR}/comparison_metrics.csv}"
 COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH:-${RUN_DIR}/gnss_update_debug.csv}"
+COMPARE_GNSS_NIS_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_CSV_PATH:-}"
+COMPARE_GNSS_NIS_DEBUG_MAX_RATE_HZ="${PX4_SAFE_COMPARE_GNSS_NIS_DEBUG_MAX_RATE_HZ:-2.0}"
 COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH:-${RUN_DIR}/heading_update_debug.csv}"
 COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH="${PX4_SAFE_COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH:-${RUN_DIR}/state_publish_debug.csv}"
+COMPARE_RAW_ODOM_DECIMATION="${PX4_SAFE_COMPARE_RAW_ODOM_DECIMATION:-50}"
+COMPARE_PATH_PUBLISH_RATE_HZ="${PX4_SAFE_COMPARE_PATH_PUBLISH_RATE_HZ:-5.0}"
+COMPARE_POSE_DECIMATION="${PX4_SAFE_COMPARE_POSE_DECIMATION:-5}"
+COMPARE_MAX_PATH_POINTS="${PX4_SAFE_COMPARE_MAX_PATH_POINTS:-20000}"
+COMPARE_CORE_PROCESSING_ENABLE="${PX4_SAFE_COMPARE_CORE_PROCESSING_ENABLE:-true}"
+COMPARE_CORE_IMU_DECIMATION="${PX4_SAFE_COMPARE_CORE_IMU_DECIMATION:-1}"
+COMPARE_CORE_MAX_IMU_RATE_HZ="${PX4_SAFE_COMPARE_CORE_MAX_IMU_RATE_HZ:-0.0}"
+COMPARE_USE_SIM_GNSS_STD="${PX4_SAFE_COMPARE_USE_SIM_GNSS_STD:-true}"
+COMPARE_SIM_GNSS_STD_H_M="${PX4_SAFE_COMPARE_SIM_GNSS_STD_H_M:-0.08}"
+COMPARE_SIM_GNSS_STD_U_M="${PX4_SAFE_COMPARE_SIM_GNSS_STD_U_M:-0.10}"
+COMPARE_GNSS_POS_LAG_COMP_ENABLE="${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_ENABLE:-false}"
+COMPARE_GNSS_POS_LAG_COMP_SEC="${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_SEC:-0.25}"
+COMPARE_GNSS_POS_LAG_COMP_MAX_SEC="${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MAX_SEC:-0.50}"
+COMPARE_GNSS_POS_LAG_COMP_MIN_SPEED_MPS="${PX4_SAFE_COMPARE_GNSS_POS_LAG_COMP_MIN_SPEED_MPS:-0.50}"
+COMPARE_ARMED_CRUISE_GNSS_POS_OVERRIDE_ENABLE="${PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_OVERRIDE_ENABLE:-true}"
+COMPARE_ARMED_CRUISE_GNSS_POS_STD_H_M="${PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_H_M:-0.06}"
+COMPARE_ARMED_CRUISE_GNSS_POS_STD_U_M="${PX4_SAFE_COMPARE_ARMED_CRUISE_GNSS_POS_STD_U_M:-0.08}"
+COMPARE_TERMINAL_DESCENT_OBSERVATION_ENABLE="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_OBSERVATION_ENABLE:-false}"
+COMPARE_TERMINAL_DESCENT_REQUIRE_RTL_MODE="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_REQUIRE_RTL_MODE:-true}"
+COMPARE_TERMINAL_DESCENT_MAX_HORIZONTAL_SPEED_MPS="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_MAX_HORIZONTAL_SPEED_MPS:-1.6}"
+COMPARE_TERMINAL_DESCENT_MIN_VERTICAL_SPEED_MPS="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_MIN_VERTICAL_SPEED_MPS:-0.30}"
+COMPARE_TERMINAL_DESCENT_MAX_GYRO_DEG_S="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_MAX_GYRO_DEG_S:-30.0}"
+COMPARE_TERMINAL_DESCENT_MAX_SOURCE_YAW_RATE_DEG_S="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_MAX_SOURCE_YAW_RATE_DEG_S:-30.0}"
+COMPARE_TERMINAL_DESCENT_MIN_ARMED_TIME_SEC="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_MIN_ARMED_TIME_SEC:-0.0}"
+COMPARE_TERMINAL_DESCENT_NATIVE_GNSS_VEL_OVERRIDE_ENABLE="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_NATIVE_GNSS_VEL_OVERRIDE_ENABLE:-true}"
+COMPARE_TERMINAL_DESCENT_NATIVE_GNSS_VEL_STD_H_MPS="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_NATIVE_GNSS_VEL_STD_H_MPS:-0.03}"
+COMPARE_TERMINAL_DESCENT_NATIVE_GNSS_VEL_STD_U_MPS="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_NATIVE_GNSS_VEL_STD_U_MPS:-0.05}"
+COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_ENABLE="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_ENABLE:-true}"
+COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_POS_STD_M="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_POS_STD_M:-0.15}"
+COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_VEL_STD_MPS="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_VEL_STD_MPS:-0.05}"
+COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_ACCBIAS_STD_Z_MPS2="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_ACCBIAS_STD_Z_MPS2:-0.05}"
+COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_ENABLE="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_ENABLE:-false}"
+COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_MAX_HSPEED_MPS="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_MAX_HSPEED_MPS:-0.30}"
+COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_STD_H_MPS="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_STD_H_MPS:-0.05}"
+COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_STD_U_MPS="${PX4_SAFE_COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_STD_U_MPS:-10.0}"
+PAIR_LOGGER_EKF2_TOPIC="${PX4_SAFE_PAIR_LOGGER_EKF2_TOPIC:-/ekf2/pose_odom}"
+PAIR_LOGGER_IEKF_TOPIC="${PX4_SAFE_PAIR_LOGGER_IEKF_TOPIC:-/kf_gins/odom}"
+PAIR_LOGGER_CSV_PATH="${PX4_SAFE_PAIR_LOGGER_CSV_PATH:-${RUN_DIR}/ekf_iekf_pairs.csv}"
+PAIR_LOGGER_RATE_HZ="${PX4_SAFE_PAIR_LOGGER_RATE_HZ:-10}"
+PAIR_LOGGER_SYNC_TOLERANCE_MS="${PX4_SAFE_PAIR_LOGGER_SYNC_TOLERANCE_MS:-50}"
+PAIR_LOGGER_ALIGN_MIN_PAIRS="${PX4_SAFE_PAIR_LOGGER_ALIGN_MIN_PAIRS:-10}"
+PAIR_LOGGER_DELAY_AFTER_COMPARE_SEC="${PX4_SAFE_PAIR_LOGGER_DELAY_AFTER_COMPARE_SEC:-2}"
 GPS_PROBE_GPS_TOPIC="${PX4_SAFE_GPS_PROBE_GPS_TOPIC:-/gps/fix}"
 GPS_PROBE_ODOM_TOPIC="${PX4_SAFE_GPS_PROBE_ODOM_TOPIC:-/ekf2/pose_odom}"
 GPS_PROBE_SECOND_ODOM_TOPIC="${PX4_SAFE_GPS_PROBE_SECOND_ODOM_TOPIC:-/kf_gins/odom_raw}"
@@ -102,6 +167,7 @@ PLOTJUGGLER_LOG="${RUN_DIR}/plotjuggler.log"
 MISSION_PREFLIGHT_LOG="${RUN_DIR}/mission_preflight.log"
 GPS_VS_POSE_LOG="${RUN_DIR}/gps_vs_pose.log"
 GPS_VS_SECOND_POSE_LOG="${RUN_DIR}/gps_vs_second_pose.log"
+PAIR_LOGGER_LOG="${RUN_DIR}/ekf_iekf_pair_logger.log"
 ROS_LOG_DIR_SAFE="${RUN_DIR}/ros_logs"
 PID_FILE="${RUN_DIR}/pids.env"
 PX4_LOG_SANITIZED="${RUN_DIR}/px4_sanitized.log"
@@ -123,6 +189,7 @@ QGC_PATTERN="QGroundControl-x86_64\\.AppImage|/tmp/\\.mount_.*QGroundControl"
 COMPARE_PATTERN="compare_ekf_iekf\\.launch\\.py|kf_gins_node|real_time_comparison\\.py|ekf2_state_relay\\.py|ekf2_path_publisher\\.py|iekf_path_publisher\\.py|iekf_aligned_path_publisher\\.py|rviz2"
 PLOTJUGGLER_PATTERN="plotjuggler"
 GPS_PROBE_PATTERN="gps_vs_pose_probe.py"
+PAIR_LOGGER_PATTERN="ekf_iekf_pair_logger.py"
 
 mkdir -p "${RUN_DIR}" "${ROS_LOG_DIR_SAFE}"
 
@@ -298,6 +365,7 @@ COMPARE_PID="${COMPARE_PID:-}"
 PLOTJUGGLER_PID="${PLOTJUGGLER_PID:-}"
 GPS_POSE_PID="${GPS_POSE_PID:-}"
 GPS_SECOND_POSE_PID="${GPS_SECOND_POSE_PID:-}"
+PAIR_LOGGER_PID="${PAIR_LOGGER_PID:-}"
 RUN_DIR="${RUN_DIR}"
 EOF
 }
@@ -349,7 +417,8 @@ build_current_session_ignore_pids() {
     "${COMPARE_PID:-}" \
     "${PLOTJUGGLER_PID:-}" \
     "${GPS_POSE_PID:-}" \
-    "${GPS_SECOND_POSE_PID:-}"; do
+    "${GPS_SECOND_POSE_PID:-}" \
+    "${PAIR_LOGGER_PID:-}"; do
     [[ -n "${root_pid}" ]] || continue
     while IFS= read -r tree_pid; do
       [[ -n "${tree_pid}" ]] || continue
@@ -458,6 +527,7 @@ detect_global_runtime_conflicts() {
   append_pattern_conflicts "compare" "${COMPARE_PATTERN}"
   append_pattern_conflicts "plotjuggler" "${PLOTJUGGLER_PATTERN}"
   append_pattern_conflicts "gps-probe" "${GPS_PROBE_PATTERN}"
+  append_pattern_conflicts "pair-logger" "${PAIR_LOGGER_PATTERN}"
 }
 
 require_no_global_runtime_conflicts() {
@@ -741,7 +811,7 @@ start_qgc() {
 }
 
 start_compare() {
-  log "starting compare stack (rviz=${COMPARE_START_RVIZ}, ekf2_state=${COMPARE_PUBLISH_EKF2_STATE}, iekf_state=${COMPARE_PUBLISH_IEKF_STATE}, aligned_state=${COMPARE_PUBLISH_ALIGNED_IEKF_STATE}, ekf2_path=${COMPARE_ENABLE_EKF2_PATH}, iekf_path=${COMPARE_ENABLE_IEKF_PATH}, gt_path=${COMPARE_ENABLE_GT_PATH}, aligned_path=${COMPARE_ENABLE_IEKF_ALIGNED_PATH})..."
+  log "starting compare stack (kf_gins=${COMPARE_ENABLE_KF_GINS}, kf_gins_param_file=${COMPARE_KF_GINS_PARAM_FILE}, ekf2_relay=${COMPARE_ENABLE_EKF2_RELAY}, gnss_relay=${COMPARE_ENABLE_GNSS_RELAY}, gnss_relay_mode=${COMPARE_GNSS_RELAY_MODE}, gnss_relay_subscribe=${COMPARE_GNSS_RELAY_SUBSCRIBE_ENABLE}, gnss_relay_publish=${COMPARE_GNSS_RELAY_PUBLISH_ENABLE}, static_tf=${COMPARE_ENABLE_STATIC_TF}, core_processing=${COMPARE_CORE_PROCESSING_ENABLE}, core_imu_decimation=${COMPARE_CORE_IMU_DECIMATION}, core_max_imu_rate_hz=${COMPARE_CORE_MAX_IMU_RATE_HZ}, raw_odom_decimation=${COMPARE_RAW_ODOM_DECIMATION}, path_rate=${COMPARE_PATH_PUBLISH_RATE_HZ}, pose_decimation=${COMPARE_POSE_DECIMATION}, max_path_points=${COMPARE_MAX_PATH_POINTS}, rviz=${COMPARE_START_RVIZ}, ekf2_state=${COMPARE_PUBLISH_EKF2_STATE}, iekf_state=${COMPARE_PUBLISH_IEKF_STATE}, aligned_state=${COMPARE_PUBLISH_ALIGNED_IEKF_STATE}, ekf2_path=${COMPARE_ENABLE_EKF2_PATH}, iekf_path=${COMPARE_ENABLE_IEKF_PATH}, gt_path=${COMPARE_ENABLE_GT_PATH}, aligned_path=${COMPARE_ENABLE_IEKF_ALIGNED_PATH})..."
   setsid bash -lc "
     set -euo pipefail
     set +u
@@ -753,17 +823,29 @@ start_compare() {
     export ROS_DOMAIN_ID='${ROS_DOMAIN_ID_VALUE}'
     export ROS_LOG_DIR='${ROS_LOG_DIR_SAFE}'
     unset ROS_LOCALHOST_ONLY
-    exec ros2 launch kf_gins_ros2_native compare_ekf_iekf.launch.py \
-      use_sim_time:=true \
-      record_bag:='${COMPARE_RECORD_BAG}' \
+	    exec ros2 launch kf_gins_ros2_native compare_ekf_iekf.launch.py \
+	      use_sim_time:=true \
+	      kf_gins_param_file:='${COMPARE_KF_GINS_PARAM_FILE}' \
+	      record_bag:='${COMPARE_RECORD_BAG}' \
       start_rviz:='${COMPARE_START_RVIZ}' \
       enable_real_time_comparison:='${COMPARE_ENABLE_REAL_TIME}' \
       imu_source:='${COMPARE_IMU_SOURCE}' \
       px4_sensor_combined_topic:='${COMPARE_SENSOR_COMBINED_TOPIC}' \
       gnss_relay_mode:='${COMPARE_GNSS_RELAY_MODE}' \
+      enable_gnss_relay:='${COMPARE_ENABLE_GNSS_RELAY}' \
+      gnss_relay_subscribe_enable:='${COMPARE_GNSS_RELAY_SUBSCRIBE_ENABLE}' \
+      gnss_relay_publish_enable:='${COMPARE_GNSS_RELAY_PUBLISH_ENABLE}' \
+      enable_gps_dropzones:='${COMPARE_ENABLE_GPS_DROPZONES}' \
+      inject_dropzone_gps_to_px4:='${COMPARE_INJECT_DROPZONE_GPS_TO_PX4}' \
+      px4_gps_injection_mode:='${COMPARE_PX4_GPS_INJECTION_MODE}' \
+      px4_set_params:='${COMPARE_PX4_SET_PARAMS}' \
       gnss_source:='${COMPARE_GNSS_SOURCE}' \
       enable_px4_aux_state_relay:='${COMPARE_ENABLE_PX4_AUX_STATE_RELAY}' \
+      enable_ekf2_relay:='${COMPARE_ENABLE_EKF2_RELAY}' \
+      enable_kf_gins:='${COMPARE_ENABLE_KF_GINS}' \
+      enable_static_tf:='${COMPARE_ENABLE_STATIC_TF}' \
       ekf2_input_mode:='${COMPARE_EKF2_INPUT_MODE}' \
+      ekf2_use_input_stamp:='${COMPARE_EKF2_USE_INPUT_STAMP}' \
       heading_source:='${COMPARE_HEADING_SOURCE}' \
       mavros_heading_topic:='${COMPARE_MAVROS_HEADING_TOPIC}' \
       speed_source:='${COMPARE_SPEED_SOURCE}' \
@@ -777,16 +859,83 @@ start_compare() {
       comparison_metrics_log_period_sec:='${COMPARE_METRICS_LOG_PERIOD_SEC}' \
       ekf2_relay_publish_pose:='${COMPARE_EKF2_RELAY_PUBLISH_POSE}' \
       comparison_subscribe_ekf2_pose:='${COMPARE_SUBSCRIBE_EKF2_POSE}' \
+      iekf_raw_topic:='${COMPARE_IEKF_RAW_TOPIC}' \
+      comparison_compute_raw_metrics:='${COMPARE_COMPUTE_RAW_METRICS}' \
+      comparison_raw_callback_mode:='${COMPARE_RAW_CALLBACK_MODE}' \
       enable_ekf2_path:='${COMPARE_ENABLE_EKF2_PATH}' \
       enable_iekf_path:='${COMPARE_ENABLE_IEKF_PATH}' \
       enable_gt_path:='${COMPARE_ENABLE_GT_PATH}' \
       enable_iekf_aligned_path:='${COMPARE_ENABLE_IEKF_ALIGNED_PATH}' \
       comparison_csv_path:='${COMPARE_CSV_PATH}' \
       gnss_update_debug_csv_path:='${COMPARE_GNSS_UPDATE_DEBUG_CSV_PATH}' \
+      gnss_nis_debug_csv_path:='${COMPARE_GNSS_NIS_DEBUG_CSV_PATH}' \
+      gnss_nis_debug_max_rate_hz:='${COMPARE_GNSS_NIS_DEBUG_MAX_RATE_HZ}' \
       heading_update_debug_csv_path:='${COMPARE_HEADING_UPDATE_DEBUG_CSV_PATH}' \
-      state_publish_debug_csv_path:='${COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH}'
+      state_publish_debug_csv_path:='${COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH}' \
+      raw_odom_decimation:='${COMPARE_RAW_ODOM_DECIMATION}' \
+      path_publish_rate_hz:='${COMPARE_PATH_PUBLISH_RATE_HZ}' \
+      pose_decimation:='${COMPARE_POSE_DECIMATION}' \
+      max_path_points:='${COMPARE_MAX_PATH_POINTS}' \
+      core_processing_enable:='${COMPARE_CORE_PROCESSING_ENABLE}' \
+      core_imu_decimation:='${COMPARE_CORE_IMU_DECIMATION}' \
+      core_max_imu_rate_hz:='${COMPARE_CORE_MAX_IMU_RATE_HZ}' \
+      use_sim_gnss_std:='${COMPARE_USE_SIM_GNSS_STD}' \
+      sim_gnss_std_h_m:='${COMPARE_SIM_GNSS_STD_H_M}' \
+      sim_gnss_std_u_m:='${COMPARE_SIM_GNSS_STD_U_M}' \
+      gnss_position_lag_compensation_enable:='${COMPARE_GNSS_POS_LAG_COMP_ENABLE}' \
+      gnss_position_lag_compensation_sec:='${COMPARE_GNSS_POS_LAG_COMP_SEC}' \
+      gnss_position_lag_compensation_max_sec:='${COMPARE_GNSS_POS_LAG_COMP_MAX_SEC}' \
+      gnss_position_lag_compensation_min_speed_mps:='${COMPARE_GNSS_POS_LAG_COMP_MIN_SPEED_MPS}' \
+      armed_cruise_gnss_pos_override_enable:='${COMPARE_ARMED_CRUISE_GNSS_POS_OVERRIDE_ENABLE}' \
+      armed_cruise_gnss_pos_std_h_m:='${COMPARE_ARMED_CRUISE_GNSS_POS_STD_H_M}' \
+      armed_cruise_gnss_pos_std_u_m:='${COMPARE_ARMED_CRUISE_GNSS_POS_STD_U_M}' \
+      terminal_descent_observation_enable:='${COMPARE_TERMINAL_DESCENT_OBSERVATION_ENABLE}' \
+      terminal_descent_require_rtl_mode:='${COMPARE_TERMINAL_DESCENT_REQUIRE_RTL_MODE}' \
+      terminal_descent_max_horizontal_speed_mps:='${COMPARE_TERMINAL_DESCENT_MAX_HORIZONTAL_SPEED_MPS}' \
+      terminal_descent_min_vertical_speed_mps:='${COMPARE_TERMINAL_DESCENT_MIN_VERTICAL_SPEED_MPS}' \
+      terminal_descent_max_gyro_deg_s:='${COMPARE_TERMINAL_DESCENT_MAX_GYRO_DEG_S}' \
+      terminal_descent_max_source_yaw_rate_deg_s:='${COMPARE_TERMINAL_DESCENT_MAX_SOURCE_YAW_RATE_DEG_S}' \
+      terminal_descent_min_armed_time_sec:='${COMPARE_TERMINAL_DESCENT_MIN_ARMED_TIME_SEC}' \
+      terminal_descent_native_gnss_vel_override_enable:='${COMPARE_TERMINAL_DESCENT_NATIVE_GNSS_VEL_OVERRIDE_ENABLE}' \
+      terminal_descent_native_gnss_vel_std_h_mps:='${COMPARE_TERMINAL_DESCENT_NATIVE_GNSS_VEL_STD_H_MPS}' \
+      terminal_descent_native_gnss_vel_std_u_mps:='${COMPARE_TERMINAL_DESCENT_NATIVE_GNSS_VEL_STD_U_MPS}' \
+      terminal_descent_vertical_cov_reopen_enable:='${COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_ENABLE}' \
+      terminal_descent_vertical_cov_reopen_pos_std_m:='${COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_POS_STD_M}' \
+      terminal_descent_vertical_cov_reopen_vel_std_mps:='${COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_VEL_STD_MPS}' \
+      terminal_descent_vertical_cov_reopen_accbias_std_z_mps2:='${COMPARE_TERMINAL_DESCENT_VERTICAL_COV_REOPEN_ACCBIAS_STD_Z_MPS2}' \
+      terminal_descent_horizontal_zero_vel_enable:='${COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_ENABLE}' \
+      terminal_descent_horizontal_zero_vel_max_hspeed_mps:='${COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_MAX_HSPEED_MPS}' \
+      terminal_descent_horizontal_zero_vel_std_h_mps:='${COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_STD_H_MPS}' \
+      terminal_descent_horizontal_zero_vel_std_u_mps:='${COMPARE_TERMINAL_DESCENT_HORIZONTAL_ZERO_VEL_STD_U_MPS}'
   " > "${COMPARE_LOG}" 2>&1 < /dev/null &
   COMPARE_PID=$!
+  save_pids
+}
+
+start_pair_logger() {
+  log "starting EKF2/IEKF pair logger (${PAIR_LOGGER_EKF2_TOPIC} vs ${PAIR_LOGGER_IEKF_TOPIC})..."
+  setsid bash -lc "
+    set -euo pipefail
+    set +u
+    source /opt/ros/humble/setup.bash
+    if [[ -f '${WS_ROOT}/install/setup.bash' ]]; then
+      source '${WS_ROOT}/install/setup.bash'
+    fi
+    set -u
+    export ROS_DOMAIN_ID='${ROS_DOMAIN_ID_VALUE}'
+    export ROS_LOG_DIR='${ROS_LOG_DIR_SAFE}'
+    unset ROS_LOCALHOST_ONLY
+    exec python3 '${WS_ROOT}/src/kf_gins_ros2_native/scripts/ekf_iekf_pair_logger.py' \
+      --ros-args \
+      -p use_sim_time:=true \
+      -p ekf2_topic:='${PAIR_LOGGER_EKF2_TOPIC}' \
+      -p iekf_topic:='${PAIR_LOGGER_IEKF_TOPIC}' \
+      -p csv_path:='${PAIR_LOGGER_CSV_PATH}' \
+      -p write_rate_hz:='${PAIR_LOGGER_RATE_HZ}' \
+      -p sync_tolerance_ms:='${PAIR_LOGGER_SYNC_TOLERANCE_MS}' \
+      -p align_min_pairs:='${PAIR_LOGGER_ALIGN_MIN_PAIRS}'
+  " > "${PAIR_LOGGER_LOG}" 2>&1 < /dev/null &
+  PAIR_LOGGER_PID=$!
   save_pids
 }
 
@@ -855,7 +1004,7 @@ show_status() {
   load_pids
 
   local agent_pid_current px4_pid_current mavros_pid_current qgc_pid_current monitor_pid_current compare_pid_current plotjuggler_pid_current
-  local gps_pose_state gps_second_pose_state
+  local gps_pose_state gps_second_pose_state pair_logger_state
   agent_pid_current="$(first_matching_pid "${AGENT_PATTERN}")"
   px4_pid_current="$(first_matching_pid "${PX4_PATTERN}|${PX4_SITL_RUN_PATTERN}|${GZSERVER_PATTERN}|${GZCLIENT_PATTERN}")"
   mavros_pid_current="$(first_matching_pid "${MAVROS_PATTERN}")"
@@ -873,6 +1022,11 @@ show_status() {
   else
     gps_second_pose_state="stopped"
   fi
+  if [[ -n "${PAIR_LOGGER_PID:-}" ]] && is_running "${PAIR_LOGGER_PID}"; then
+    pair_logger_state="running"
+  else
+    pair_logger_state="stopped"
+  fi
 
   echo
   log "run_dir=${RUN_DIR}"
@@ -885,6 +1039,7 @@ show_status() {
   printf '  plotjuggler: %s pid=%s\n'  "$([[ -n "${plotjuggler_pid_current}" ]] && echo running || echo stopped)" "${plotjuggler_pid_current}"
   printf '  gps_vs_pose: %s pid=%s\n'  "${gps_pose_state}" "${GPS_POSE_PID:-}"
   printf '  gps_vs_raw:  %s pid=%s\n'  "${gps_second_pose_state}" "${GPS_SECOND_POSE_PID:-}"
+  printf '  pair_logger: %s pid=%s\n'  "${pair_logger_state}" "${PAIR_LOGGER_PID:-}"
 
   echo
   log "summary"
@@ -898,7 +1053,9 @@ show_status() {
   echo "  mavros_guided_no_origin=$(count_fixed 'PositionTargetGlobal failed because no origin' "${MAVROS_LOG}")"
   echo "  compare_started=$(count_fixed '[INFO] [launch]: All log files can be found below' "${COMPARE_LOG}")"
   echo "  comparison_topics_seen=$(count_fixed '/comparison/' "${COMPARE_LOG}")"
+  echo "  gnss_nis_debug_csv_present=$([[ -n "${COMPARE_GNSS_NIS_DEBUG_CSV_PATH}" && -s "${COMPARE_GNSS_NIS_DEBUG_CSV_PATH}" ]] && echo 1 || echo 0)"
   echo "  state_publish_debug_csv_present=$([[ -s "${COMPARE_STATE_PUBLISH_DEBUG_CSV_PATH}" ]] && echo 1 || echo 0)"
+  echo "  ekf_iekf_pair_csv_present=$([[ -s "${PAIR_LOGGER_CSV_PATH}" ]] && echo 1 || echo 0)"
   echo "  gps_vs_pose_csv_present=$([[ -s "${GPS_PROBE_CSV_PATH}" ]] && echo 1 || echo 0)"
   echo "  gps_vs_second_csv_present=$([[ -s "${GPS_PROBE_SECOND_CSV_PATH}" ]] && echo 1 || echo 0)"
 
@@ -911,6 +1068,7 @@ show_status() {
   echo "  ${MONITOR_LOG}"
   echo "  ${COMPARE_LOG}"
   echo "  ${PLOTJUGGLER_LOG}"
+  echo "  ${PAIR_LOGGER_LOG}"
   echo "  ${MISSION_PREFLIGHT_LOG}"
   echo "  ${GPS_VS_POSE_LOG}"
   echo "  ${GPS_VS_SECOND_POSE_LOG}"
@@ -934,6 +1092,7 @@ start_all() {
   : > "${MONITOR_LOG}"
   : > "${COMPARE_LOG}"
   : > "${PLOTJUGGLER_LOG}"
+  : > "${PAIR_LOGGER_LOG}"
   : > "${MISSION_PREFLIGHT_LOG}"
   : > "${GPS_VS_POSE_LOG}"
   : > "${GPS_VS_SECOND_POSE_LOG}"
@@ -967,6 +1126,12 @@ start_all() {
     log "waiting ${COMPARE_DELAY_AFTER_QGC_SEC}s before compare/RViz..."
     sleep "${COMPARE_DELAY_AFTER_QGC_SEC}"
     start_compare
+  fi
+
+  if [[ "${START_PAIR_LOGGER}" == "1" ]]; then
+    log "waiting ${PAIR_LOGGER_DELAY_AFTER_COMPARE_SEC}s before EKF2/IEKF pair logger..."
+    sleep "${PAIR_LOGGER_DELAY_AFTER_COMPARE_SEC}"
+    start_pair_logger
   fi
 
   if [[ "${START_GPS_PROBES}" == "1" ]]; then
@@ -1033,6 +1198,17 @@ start_optional_client() {
         start_gps_probes
       fi
       ;;
+    pair-logger)
+      require_current_core_runtime "start-pair-logger"
+      build_current_session_ignore_pids
+      require_no_global_runtime_conflicts "start-pair-logger" \
+        "${CURRENT_SESSION_IGNORE_PIDS[@]}"
+      if [[ -n "${PAIR_LOGGER_PID:-}" ]] && is_running "${PAIR_LOGGER_PID:-}"; then
+        log "EKF2/IEKF pair logger is already running"
+      else
+        start_pair_logger
+      fi
+      ;;
     *)
       log "unknown optional client: ${client}"
       exit 1
@@ -1045,6 +1221,7 @@ start_optional_client() {
 stop_all() {
   load_pids
   log "stopping session under ${RUN_DIR}"
+  kill_if_running "${PAIR_LOGGER_PID:-}"
   kill_if_running "${GPS_SECOND_POSE_PID:-}"
   kill_if_running "${GPS_POSE_PID:-}"
   kill_if_running "${MONITOR_PID:-}"
@@ -1058,6 +1235,7 @@ stop_all() {
   kill_pattern_if_running "${PLOTJUGGLER_PATTERN}"
   kill_pattern_if_running "${COMPARE_PATTERN}"
   kill_pattern_if_running "${QGC_PATTERN}"
+  kill_pattern_if_running "${PAIR_LOGGER_PATTERN}"
   kill_pattern_if_running "${GPS_PROBE_PATTERN}"
   kill_pattern_if_running "${MAVROS_PATTERN}"
   kill_pattern_if_running "${GZCLIENT_PATTERN}"
@@ -1085,6 +1263,9 @@ case "${CMD}" in
   start-gps-probes)
     start_optional_client gps-probes
     ;;
+  start-pair-logger)
+    start_optional_client pair-logger
+    ;;
   stop)
     stop_all
     ;;
@@ -1092,7 +1273,7 @@ case "${CMD}" in
     show_status
     ;;
   *)
-    echo "usage: $0 {start|start-qgc|start-compare|start-plotjuggler|start-gps-probes|stop|status} [run_dir]" >&2
+    echo "usage: $0 {start|start-qgc|start-compare|start-plotjuggler|start-gps-probes|start-pair-logger|stop|status} [run_dir]" >&2
     exit 1
     ;;
 esac

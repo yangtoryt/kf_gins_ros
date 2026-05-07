@@ -86,8 +86,8 @@ class Px4ParamSetter(Node):
         self.params.extend(_parse_kv_list(param_floats, "float", self.get_logger()))
         self.params.extend(_parse_kv_list(param_bools, "bool", self.get_logger()))
 
-        self.client_v2 = self.create_client(ParamSetV2, self.service_set_v2)
-        self.client = self.create_client(ParamSet, self.service_set)
+        self.client_v2 = None
+        self.client = None
         self._connected = False
         self.state_sub = self.create_subscription(State, self.state_topic, self._on_state, 10)
 
@@ -141,9 +141,34 @@ class Px4ParamSetter(Node):
             rclpy.spin_once(self, timeout_sec=0.2)
         return None
 
-    def _resolve_service(self, client, current_name, type_name):
+    def _ensure_v2_client(self, name):
+        if self.client is not None and name == self.service_set:
+            self.destroy_client(self.client)
+            self.client = None
+        if self.client_v2 is None or name != self.service_set_v2:
+            if self.client_v2 is not None:
+                self.destroy_client(self.client_v2)
+            self.client_v2 = self.create_client(ParamSetV2, name)
+            self.service_set_v2 = name
+        return self.client_v2
+
+    def _ensure_legacy_client(self, name):
+        if self.client_v2 is not None and name == self.service_set_v2:
+            self.destroy_client(self.client_v2)
+            self.client_v2 = None
+        if self.client is None or name != self.service_set:
+            if self.client is not None:
+                self.destroy_client(self.client)
+            self.client = self.create_client(ParamSet, name)
+            self.service_set = name
+        return self.client
+
+    def _resolve_service(self, current_name, type_name):
+        use_v2 = type_name.endswith("ParamSetV2")
         if not self.auto_detect_service:
-            return client, current_name
+            if use_v2:
+                return self._ensure_v2_client(current_name), current_name
+            return self._ensure_legacy_client(current_name), current_name
         found = self._find_service_by_type(type_name)
         if not found:
             found = self._wait_for_service_by_type(type_name, self.wait_timeout_sec * self.retry_count)
@@ -151,10 +176,10 @@ class Px4ParamSetter(Node):
             self.get_logger().warn(
                 f"Service {current_name} not found, auto-detected {found}."
             )
-            if type_name.endswith("ParamSetV2"):
-                return self.create_client(ParamSetV2, found), found
-            return self.create_client(ParamSet, found), found
-        return client, current_name
+        name = found or current_name
+        if use_v2:
+            return self._ensure_v2_client(name), name
+        return self._ensure_legacy_client(name), name
 
     def _make_param_value(self, kind, value):
         param = ParameterValue()
@@ -189,32 +214,25 @@ class Px4ParamSetter(Node):
             "mavros_msgs/srv/ParamSetV2", self.wait_timeout_sec
         )
         if v2_name:
-            # 有些 MAVROS 只提供 /mavros/param/set (legacy)，避免用 V2 类型占用同名服务
-            if v2_name == self.service_set:
+            # MAVROS ROS 2 may advertise the V2 service at /mavros/param/set,
+            # so choose the client by service type, not by the service name.
+            if v2_name != self.service_set_v2:
                 self.get_logger().warn(
-                    f"ParamSetV2 service not advertised; found legacy {v2_name}, using ParamSet."
+                    f"Service {self.service_set_v2} not found, auto-detected {v2_name}."
                 )
-                use_v2 = False
-            else:
-                if v2_name != self.service_set_v2:
-                    self.get_logger().warn(
-                        f"Service {self.service_set_v2} not found, auto-detected {v2_name}."
-                    )
-                    self.client_v2 = self.create_client(ParamSetV2, v2_name)
-                    self.service_set_v2 = v2_name
-                use_v2 = self._wait_for_client(self.client_v2, self.service_set_v2)
-                if not use_v2:
-                    self.get_logger().warn("ParamSetV2 not available, falling back to ParamSet.")
+            self.client_v2 = self._ensure_v2_client(v2_name)
+            use_v2 = self._wait_for_client(self.client_v2, self.service_set_v2)
+            if not use_v2:
+                self.get_logger().warn("ParamSetV2 not available, falling back to ParamSet.")
         else:
             use_v2 = False
             self.get_logger().warn("ParamSetV2 service not advertised, using legacy ParamSet.")
 
         if not use_v2:
+            self.client = self._ensure_legacy_client(self.service_set)
             ok = self._wait_for_client(self.client, self.service_set)
             if not ok:
-                self.client, self.service_set = self._resolve_service(
-                    self.client, self.service_set, "mavros_msgs/srv/ParamSet"
-                )
+                self.client, self.service_set = self._resolve_service(self.service_set, "mavros_msgs/srv/ParamSet")
                 ok = self._wait_for_client(self.client, self.service_set)
             if not ok:
                 self.get_logger().error("ParamSet service not available, giving up.")
@@ -241,6 +259,7 @@ class Px4ParamSetter(Node):
                 if use_v2:
                     self.get_logger().warn("Retrying with legacy ParamSet.")
                     use_v2 = False
+                    self.client = self._ensure_legacy_client(self.service_set)
                     if self._wait_for_client(self.client, self.service_set):
                         req = ParamSet.Request()
                         req.param_id = name

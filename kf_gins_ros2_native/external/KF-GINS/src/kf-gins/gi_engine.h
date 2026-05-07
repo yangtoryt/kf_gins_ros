@@ -30,6 +30,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include "common/types.h"
@@ -47,6 +48,15 @@ struct ObservationDebugInfo {
         Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN())};
     Eigen::Vector3d gnss_position_std_neu_m{
         Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN())};
+    Eigen::Matrix3d gnss_position_innovation_cov_neu_m2{
+        Eigen::Matrix3d::Constant(std::numeric_limits<double>::quiet_NaN())};
+    double gnss_position_nis_h_2d{std::numeric_limits<double>::quiet_NaN()};
+    double gnss_position_nis_u_1d{std::numeric_limits<double>::quiet_NaN()};
+    double gnss_position_nis_3d{std::numeric_limits<double>::quiet_NaN()};
+    double gnss_position_gate_threshold_nis{std::numeric_limits<double>::quiet_NaN()};
+    bool gnss_position_update_accepted{false};
+    bool gnss_position_update_rejected{false};
+    std::string gnss_position_update_reason{"not_available"};
     Eigen::Vector3d gnss_velocity_residual_ned_mps{
         Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN())};
     Eigen::Vector3d gnss_velocity_std_ned_mps{

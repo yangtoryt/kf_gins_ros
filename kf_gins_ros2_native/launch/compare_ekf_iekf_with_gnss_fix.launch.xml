@@ -20,7 +20,8 @@
   <arg name="scenario" default="city_dense" description="Gazebo world scenario"/>
   <arg name="record_bag" default="true" description="Record rosbag"/>
   <arg name="start_rviz" default="true" description="Start RViz"/>
-  <arg name="enable_real_time_comparison" default="true" description="Enable real-time EKF2 vs IEKF comparison"/>
+  <arg name="enable_real_time_comparison" default="false" description="Enable real-time EKF2 vs IEKF comparison"/>
+  <arg name="raw_odom_decimation" default="50" description="Publish every Nth /kf_gins/odom_raw sample"/>
   <arg name="enable_gps_dropzones" default="false" description="Enable GNSS dropzones (simulated GNSS outages)"/>
 
   <!-- 信息提示 -->
@@ -36,6 +37,7 @@
     <arg name="record_bag" value="$(var record_bag)"/>
     <arg name="start_rviz" value="$(var start_rviz)"/>
     <arg name="enable_real_time_comparison" value="$(var enable_real_time_comparison)"/>
+    <arg name="raw_odom_decimation" value="$(var raw_odom_decimation)"/>
     <arg name="enable_gps_dropzones" value="$(var enable_gps_dropzones)"/>
   </include>
 
