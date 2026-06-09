@@ -43,3 +43,54 @@ sage_husa:
   diag_only: true
   min_var_factor: 0.1
   min_var_abs: 0.0
+
+bounded_adaptive_r:
+  enable: false
+  mode: nis_bounded
+  apply_position: true
+  apply_velocity: true
+  alpha: 1.0
+  beta: 0.2
+  gamma_min: 1.0
+  gamma_max: 10.0
+  chi2_prob: 0.95
+
+bounded_adaptive_rq:
+  # Internal implementation path for the paper-facing
+  # Process-Context-Safeguarded Adaptive-R IESKF.
+  # Keep field names stable for existing scripts; paper-facing flat-Q
+  # configurations fix Q scaling at 1.0 and must not be reported as
+  # adaptive-Q validation.
+  enable: false
+  mode: nis_rq_selector
+  apply_position: true
+  apply_velocity: false
+  r_only_on_observation_disturbance: true
+  q_on_process_disturbance: true
+  chi2_prob: 0.95
+  nis_ratio_start: 1.0
+  nis_ratio_full: 3.0
+  consecutive_exceed_min: 3
+  hold_updates: 5
+  alpha_r: 1.0
+  alpha_r_process: 0.25
+  alpha_q: 1.0
+  beta_r: 0.2
+  beta_q: 0.1
+  gamma_r_min: 1.0
+  gamma_r_max_observation: 6.0
+  gamma_r_max_process: 1.5
+  lambda_vrw_max: 3.0
+  lambda_arw_max: 1.5
+  lambda_accbias_max: 2.0
+  lambda_gyrbias_max: 1.0
+  require_gps_quality_stable_for_q: true
+  require_process_context_for_q: true
+  process_context_score_start: 0.20
+  mixed_observation_score_start: 0.50
+  source_gate_enable: false
+  q_source_observation_score_max: 1.0
+  velocity_evidence_gate_enable: false
+  q_high_observation_velocity_nis_ratio_min: 2.0
+  q_high_observation_velocity_residual_h_min: 0.15
+  velocity_evidence_time_tolerance_sec: 0.5

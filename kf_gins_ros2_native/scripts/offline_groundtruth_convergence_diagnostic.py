@@ -24,6 +24,11 @@ DEFAULT_WINDOWS = [
     (300.0, 360.0),
 ]
 
+WGS84_A_M = 6378137.0
+WGS84_F = 1.0 / 298.257223563
+WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
+PX4_SPHERE_RADIUS_M = 6371000.0
+
 
 def finite(value: float) -> bool:
     return math.isfinite(value)
@@ -116,8 +121,46 @@ def find_topic_csv(ulog_dir: Path, topic: str) -> Path:
     return matches[0]
 
 
-def load_groundtruth(ulog_dir: Path) -> tuple[list[dict[str, float]], list[float]]:
-    path = find_topic_csv(ulog_dir, "vehicle_local_position_groundtruth")
+def llh_to_ecef(lat_rad: float, lon_rad: float, h_m: float) -> tuple[float, float, float]:
+    sin_lat = math.sin(lat_rad)
+    cos_lat = math.cos(lat_rad)
+    n = WGS84_A_M / math.sqrt(1.0 - WGS84_E2 * sin_lat * sin_lat)
+    return (
+        (n + h_m) * cos_lat * math.cos(lon_rad),
+        (n + h_m) * cos_lat * math.sin(lon_rad),
+        (n * (1.0 - WGS84_E2) + h_m) * sin_lat,
+    )
+
+
+def ecef_to_enu(
+    ecef: tuple[float, float, float],
+    origin_ecef: tuple[float, float, float],
+    origin_lat_rad: float,
+    origin_lon_rad: float,
+) -> tuple[float, float, float]:
+    dx = ecef[0] - origin_ecef[0]
+    dy = ecef[1] - origin_ecef[1]
+    dz = ecef[2] - origin_ecef[2]
+    sin_lat = math.sin(origin_lat_rad)
+    cos_lat = math.cos(origin_lat_rad)
+    sin_lon = math.sin(origin_lon_rad)
+    cos_lon = math.cos(origin_lon_rad)
+    east = -sin_lon * dx + cos_lon * dy
+    north = -sin_lat * cos_lon * dx - sin_lat * sin_lon * dy + cos_lat * dz
+    up = cos_lat * cos_lon * dx + cos_lat * sin_lon * dy + sin_lat * dz
+    return east, north, up
+
+
+def local_groundtruth_ref_valid(path: Path) -> bool:
+    for row in read_csv(path)[:20]:
+        ref_lat = to_float(row.get("ref_lat"))
+        ref_lon = to_float(row.get("ref_lon"))
+        if finite(ref_lat) and finite(ref_lon) and (abs(ref_lat) > 1.0e-6 or abs(ref_lon) > 1.0e-6):
+            return True
+    return False
+
+
+def load_local_groundtruth(path: Path) -> tuple[list[dict[str, float]], list[float]]:
     rows: list[dict[str, float]] = []
     for row in read_csv(path):
         t = to_float(row.get("timestamp")) * 1e-6
@@ -135,6 +178,67 @@ def load_groundtruth(ulog_dir: Path) -> tuple[list[dict[str, float]], list[float
             )
     rows.sort(key=lambda item: item["timestamp_sec"])
     return rows, [row["timestamp_sec"] for row in rows]
+
+
+def load_global_groundtruth(path: Path) -> tuple[list[dict[str, float]], list[float]]:
+    raw_rows = read_csv(path)
+    origin: tuple[float, float, float] | None = None
+    origin_lat_rad = math.nan
+    origin_lon_rad = math.nan
+    rows: list[dict[str, float]] = []
+    for row in raw_rows:
+        t = to_float(row.get("timestamp")) * 1e-6
+        lat_deg = to_float(row.get("lat"))
+        lon_deg = to_float(row.get("lon"))
+        alt_m = to_float(row.get("alt"))
+        if not all(finite(item) for item in (t, lat_deg, lon_deg, alt_m)):
+            continue
+        lat_rad = math.radians(lat_deg)
+        lon_rad = math.radians(lon_deg)
+        ecef = llh_to_ecef(lat_rad, lon_rad, alt_m)
+        if origin is None:
+            origin = ecef
+            origin_lat_rad = lat_rad
+            origin_lon_rad = lon_rad
+        east, north, up = ecef_to_enu(ecef, origin, origin_lat_rad, origin_lon_rad)
+        rows.append({"timestamp_sec": t, "x_m": east, "y_m": north, "z_m": up})
+    rows.sort(key=lambda item: item["timestamp_sec"])
+    return rows, [row["timestamp_sec"] for row in rows]
+
+
+def load_groundtruth(
+    ulog_dir: Path,
+    source: str = "auto",
+) -> tuple[list[dict[str, float]], list[float], str]:
+    path = find_topic_csv(ulog_dir, "vehicle_local_position_groundtruth")
+    if source not in {"auto", "local", "global"}:
+        raise ValueError(f"unsupported groundtruth source: {source}")
+    if source == "local" or (source == "auto" and local_groundtruth_ref_valid(path)):
+        rows, times = load_local_groundtruth(path)
+        return rows, times, "local"
+    if source == "local":
+        rows, times = load_local_groundtruth(path)
+        return rows, times, "local"
+    global_path = find_topic_csv(ulog_dir, "vehicle_global_position_groundtruth")
+    rows, times = load_global_groundtruth(global_path)
+    return rows, times, "global"
+
+
+def load_groundtruth_ref_lat_rad(ulog_dir: Path) -> float:
+    path = find_topic_csv(ulog_dir, "vehicle_local_position_groundtruth")
+    for row in read_csv(path):
+        ref_lat = to_float(row.get("ref_lat"))
+        if finite(ref_lat):
+            return math.radians(ref_lat)
+    raise RuntimeError(f"missing ref_lat in {path}")
+
+
+def wgs84_radii(lat_rad: float) -> tuple[float, float]:
+    sin_lat = math.sin(lat_rad)
+    denom = math.sqrt(1.0 - WGS84_E2 * sin_lat * sin_lat)
+    rn = WGS84_A_M / denom
+    rm = WGS84_A_M * (1.0 - WGS84_E2) / (denom * denom * denom)
+    return rm, rn
 
 
 def nearest_groundtruth(
@@ -224,9 +328,51 @@ def load_fit(path: Path, topic: str, subset: str) -> dict[str, float]:
 
 
 def transform_xy(x: float, y: float, fit: dict[str, float]) -> tuple[float, float]:
+    mode = fit.get("projection_mode", "gps_fit")
+    if mode == "raw_wgs84_enu":
+        return x, y
+    if mode == "px4_sphere_anisotropic":
+        return x * fit["px4_east_scale"], y * fit["px4_north_scale"]
     a_real = fit["a_real"]
     a_imag = fit["a_imag"]
     return a_real * x - a_imag * y, a_imag * x + a_real * y
+
+
+def build_projection(
+    fit_csv: Path,
+    fit_topic: str,
+    fit_subset: str,
+    projection_mode: str,
+    ulog_dir: Path,
+) -> dict[str, float]:
+    if projection_mode == "gps_fit":
+        fit = load_fit(fit_csv, fit_topic, fit_subset)
+        fit["projection_mode"] = projection_mode
+        return fit
+    if projection_mode == "raw_wgs84_enu":
+        return {
+            "projection_mode": projection_mode,
+            "scale": 1.0,
+            "angle_deg": 0.0,
+            "a_real": 1.0,
+            "a_imag": 0.0,
+        }
+    if projection_mode == "px4_sphere_anisotropic":
+        ref_lat = load_groundtruth_ref_lat_rad(ulog_dir)
+        rm, rn = wgs84_radii(ref_lat)
+        east_scale = PX4_SPHERE_RADIUS_M / rn
+        north_scale = PX4_SPHERE_RADIUS_M / rm
+        return {
+            "projection_mode": projection_mode,
+            "scale": math.nan,
+            "angle_deg": 0.0,
+            "a_real": math.nan,
+            "a_imag": math.nan,
+            "px4_east_scale": east_scale,
+            "px4_north_scale": north_scale,
+            "projection_ref_lat_deg": math.degrees(ref_lat),
+        }
+    raise ValueError(f"unsupported projection mode: {projection_mode}")
 
 
 def joined_rows(
@@ -235,10 +381,13 @@ def joined_rows(
     ulog_dir: Path,
     fit: dict[str, float],
     max_join_dt_sec: float,
+    groundtruth_source: str,
+    pair_csv: Path | None = None,
 ) -> list[dict[str, object]]:
-    gt_rows, gt_times = load_groundtruth(ulog_dir)
+    gt_rows, gt_times, resolved_groundtruth_source = load_groundtruth(ulog_dir, groundtruth_source)
+    fit["groundtruth_source"] = resolved_groundtruth_source
     ctx_rows, ctx_times = load_gnss_context(run_dir)
-    pair_path = run_dir / "ekf_iekf_pairs.csv"
+    pair_path = pair_csv or (run_dir / "ekf_iekf_pairs.csv")
     if not pair_path.exists():
         raise FileNotFoundError(pair_path)
 
@@ -452,6 +601,7 @@ def build_report(
     joined_rows: list[dict[str, object]],
     out_dir: Path,
 ) -> str:
+    projection_mode = str(fit.get("projection_mode", "gps_fit"))
     armed = [row for row in summary_rows if row["window"] == "armed_all"]
     segment_labels = {
         "segment_mission_all",
@@ -474,17 +624,32 @@ def build_report(
         "# Groundtruth Convergence Diagnostic",
         "",
         "This report compares EKF2 and projection-normalized IEKF against ULog `vehicle_local_position_groundtruth` in a common ROS ENU frame.",
+        f"Groundtruth source: `{fit.get('groundtruth_source', 'local')}`.",
         "",
-        "Both estimators are aligned to groundtruth using the same early armed window. IEKF XY is first normalized with the independent GPS/groundtruth projection fit, then translated only for the early-window origin offset.",
+        "Both estimators are aligned to groundtruth using the same early armed window. IEKF XY projection is selected by `projection_mode`, then translated only for the early-window origin offset.",
         "",
         "## Alignment",
         markdown_table(
-            ["align_rows", "fit_scale", "fit_angle_deg", "ekf2_offset_x", "ekf2_offset_y", "iekf_offset_x", "iekf_offset_y"],
+            [
+                "projection_mode",
+                "align_rows",
+                "fit_scale",
+                "fit_angle_deg",
+                "px4_east_scale",
+                "px4_north_scale",
+                "ekf2_offset_x",
+                "ekf2_offset_y",
+                "iekf_offset_x",
+                "iekf_offset_y",
+            ],
             [
                 [
+                    projection_mode,
                     int(offsets["align_rows"]),
                     fmt(fit["scale"], 6),
                     fmt(fit["angle_deg"], 4),
+                    fmt(fit.get("px4_east_scale"), 7),
+                    fmt(fit.get("px4_north_scale"), 7),
                     fmt(offsets["ekf2_offset_x_m"]),
                     fmt(offsets["ekf2_offset_y_m"]),
                     fmt(offsets["iekf_offset_x_m"]),
@@ -593,20 +758,45 @@ def main() -> int:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--fit-topic", default="vehicle_gps_position")
     parser.add_argument("--fit-subset", default="all")
+    parser.add_argument(
+        "--projection-mode",
+        choices=["gps_fit", "raw_wgs84_enu", "px4_sphere_anisotropic"],
+        default="gps_fit",
+        help="IEKF XY output-frame normalization before early translation alignment.",
+    )
     parser.add_argument("--max-join-dt-sec", type=float, default=0.03)
+    parser.add_argument(
+        "--pair-csv",
+        default="",
+        help="Optional EKF2/IEKF pair CSV path. Defaults to <run-dir>/ekf_iekf_pairs.csv.",
+    )
+    parser.add_argument(
+        "--groundtruth-source",
+        choices=["auto", "local", "global"],
+        default="auto",
+        help="Use local groundtruth, global groundtruth converted to ENU, or auto fallback when local ref_lat/ref_lon are invalid.",
+    )
     parser.add_argument("--align-start-sec", type=float, default=0.0)
     parser.add_argument("--align-end-sec", type=float, default=20.0)
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    fit = load_fit(Path(args.fit_csv), args.fit_topic, args.fit_subset)
+    fit = build_projection(
+        Path(args.fit_csv),
+        args.fit_topic,
+        args.fit_subset,
+        args.projection_mode,
+        Path(args.ulog_dir),
+    )
     raw = joined_rows(
         args.run_label,
         Path(args.run_dir),
         Path(args.ulog_dir),
         fit,
         args.max_join_dt_sec,
+        args.groundtruth_source,
+        Path(args.pair_csv) if args.pair_csv else None,
     )
     offsets = compute_offsets(raw, args.align_start_sec, args.align_end_sec)
     if int(offsets["align_rows"]) <= 0:

@@ -26,6 +26,7 @@
 #include <Eigen/Dense>
 #include <iomanip>
 #include <iostream>
+#include <string>
 
 #include "common/angle.h"
 
@@ -81,8 +82,8 @@ typedef struct GINSOptions {
     // install parameters
     Eigen::Vector3d antlever = {0, 0, 0};
 
-    // IEKF (Iterated Extended Kalman Filter) 参数
-    // IEKF parameters
+    // IESKF/IEKF 迭代参数：用于非线性观测的 iterated error-state update
+    // IESKF/IEKF iteration parameters for nonlinear error-state measurement updates
     int iekf_max_iterations = 5;              // 最大迭代次数 / max iterations
     double iekf_convergence_threshold = 1e-6; // 收敛阈值 / convergence threshold
 
@@ -95,6 +96,58 @@ typedef struct GINSOptions {
         double min_var_factor = 0.1;     // 对角线下限：min_var_factor * R0
         double min_var_abs = 0.0;        // 绝对方差下限 [unit^2]，0 表示不额外启用
     } sage_husa;
+
+    // NIS 约束有界自适应观测噪声参数
+    // NIS-bounded adaptive measurement noise options
+    struct BoundedAdaptiveROptions {
+        bool enable = false;
+        std::string mode = "nis_bounded";
+        bool apply_position = true;
+        bool apply_velocity = true;
+        double alpha = 1.0;
+        double beta = 0.2;
+        double gamma_min = 1.0;
+        double gamma_max = 10.0;
+        double chi2_prob = 0.95;
+    } bounded_adaptive_r;
+
+    // NIS 约束 R/Q selector，自适应调 R 或传播 Q；默认关闭以保持 baseline。
+    // NIS-constrained R/Q selector; disabled by default to preserve baseline.
+    struct BoundedAdaptiveRQOptions {
+        bool enable = false;
+        std::string mode = "nis_rq_selector";
+        bool apply_position = true;
+        bool apply_velocity = false;
+        bool r_only_on_observation_disturbance = true;
+        bool q_on_process_disturbance = true;
+        double chi2_prob = 0.95;
+        double nis_ratio_start = 1.0;
+        double nis_ratio_full = 3.0;
+        int consecutive_exceed_min = 3;
+        int hold_updates = 5;
+        double alpha_r = 1.0;
+        double alpha_r_process = 0.25;
+        double alpha_q = 1.0;
+        double beta_r = 0.2;
+        double beta_q = 0.1;
+        double gamma_r_min = 1.0;
+        double gamma_r_max_observation = 6.0;
+        double gamma_r_max_process = 1.5;
+        double lambda_vrw_max = 3.0;
+        double lambda_arw_max = 1.5;
+        double lambda_accbias_max = 2.0;
+        double lambda_gyrbias_max = 1.0;
+        bool require_gps_quality_stable_for_q = true;
+        bool require_process_context_for_q = true;
+        double process_context_score_start = 0.20;
+        double mixed_observation_score_start = 0.50;
+        bool source_gate_enable = false;
+        double q_source_observation_score_max = 1.0;
+        bool velocity_evidence_gate_enable = false;
+        double q_high_observation_velocity_nis_ratio_min = 2.0;
+        double q_high_observation_velocity_residual_h_min = 0.15;
+        double velocity_evidence_time_tolerance_sec = 0.5;
+    } bounded_adaptive_rq;
 
     void print_options() {
         std::cout << "---------------KF-GINS Options:---------------" << std::endl;
@@ -163,6 +216,21 @@ typedef struct GINSOptions {
         std::cout << '\t' << "- diag_only: " << (sage_husa.diag_only ? "true" : "false") << std::endl;
         std::cout << '\t' << "- min_var_factor: " << sage_husa.min_var_factor << std::endl;
         std::cout << '\t' << "- min_var_abs: " << sage_husa.min_var_abs << std::endl << std::endl;
+
+        // 打印 NIS 约束有界自适应 R 参数
+        // print NIS-bounded adaptive R options
+        std::cout << " - Bounded Adaptive R Options: " << std::endl;
+        std::cout << '\t' << "- enable: " << (bounded_adaptive_r.enable ? "true" : "false") << std::endl;
+        std::cout << '\t' << "- mode: " << bounded_adaptive_r.mode << std::endl;
+        std::cout << '\t' << "- apply_position: "
+                  << (bounded_adaptive_r.apply_position ? "true" : "false") << std::endl;
+        std::cout << '\t' << "- apply_velocity: "
+                  << (bounded_adaptive_r.apply_velocity ? "true" : "false") << std::endl;
+        std::cout << '\t' << "- alpha: " << bounded_adaptive_r.alpha << std::endl;
+        std::cout << '\t' << "- beta: " << bounded_adaptive_r.beta << std::endl;
+        std::cout << '\t' << "- gamma_min: " << bounded_adaptive_r.gamma_min << std::endl;
+        std::cout << '\t' << "- gamma_max: " << bounded_adaptive_r.gamma_max << std::endl;
+        std::cout << '\t' << "- chi2_prob: " << bounded_adaptive_r.chi2_prob << std::endl << std::endl;
     }
 
 } GINSOptions;

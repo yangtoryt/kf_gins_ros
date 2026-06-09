@@ -17,8 +17,136 @@ kf_gins_node:
     native_gnss_speed_std_scale: 0.4
     armed_cruise_native_gnss_vel_override_enable: true
     armed_cruise_gnss_pos_override_enable: true
+    armed_cruise_gnss_pos_override_apply_mission: true
+    armed_cruise_gnss_pos_override_apply_rtl: true
+    armed_cruise_gnss_pos_override_apply_other: true
     armed_cruise_gnss_pos_std_h_m: 0.06
     armed_cruise_gnss_pos_std_u_m: 0.08
+    gnss_position_response_boost_enable: false
+    gnss_position_response_boost_apply_mission: true
+    gnss_position_response_boost_apply_rtl: false
+    gnss_position_response_boost_residual_start_h_m: 0.25
+    gnss_position_response_boost_residual_full_h_m: 0.45
+    gnss_position_response_boost_min_horizontal_speed_mps: 0.5
+    gnss_position_response_boost_max_abs_vertical_speed_mps: 1.0
+    gnss_position_response_boost_persistence_updates: 1
+    gnss_position_response_boost_std_min_h_m: 0.04
+    gnss_position_response_boost_std_max_h_m: 0.06
+    gnss_position_gain_response_enable: false
+    gnss_position_gain_response_apply_mission: true
+    gnss_position_gain_response_apply_rtl: false
+    gnss_position_gain_response_require_armed_cruise: true
+    gnss_position_gain_response_block_turning: true
+    gnss_position_gain_response_block_post_turn: true
+    gnss_position_gain_response_residual_start_h_m: 0.15
+    gnss_position_gain_response_residual_full_h_m: 0.35
+    gnss_position_gain_response_hnis_start: 6.0
+    gnss_position_gain_response_hnis_full: 20.0
+    gnss_position_gain_response_prev_gain_low: 0.10
+    gnss_position_gain_response_prev_gain_high: 0.18
+    gnss_position_gain_response_min_horizontal_speed_mps: 3.0
+    gnss_position_gain_response_max_abs_vertical_speed_mps: 1.0
+    gnss_position_gain_response_persistence_updates: 1
+    gnss_position_gain_response_std_min_h_m: 0.03
+    gnss_position_gain_response_std_max_h_m: 0.06
+    gnss_velocity_outward_damping_enable: false
+    gnss_velocity_outward_damping_apply_mission: true
+    gnss_velocity_outward_damping_apply_rtl: false
+    gnss_velocity_outward_damping_min_core_gnss_diff_h_m: 0.20
+    gnss_velocity_outward_damping_radial_start_mps: 0.03
+    gnss_velocity_outward_damping_radial_full_mps: 0.12
+    gnss_velocity_outward_damping_min_horizontal_speed_mps: 0.5
+    gnss_velocity_outward_damping_max_abs_vertical_speed_mps: 1.0
+    gnss_velocity_outward_damping_persistence_updates: 1
+    gnss_velocity_outward_damping_hold_updates: 0
+    gnss_velocity_outward_damping_std_min_h_mps: 0.02
+    gnss_velocity_outward_damping_std_max_h_mps: 0.05
+    turn_postturn_native_velocity_deweight_enable: false
+    turn_postturn_native_velocity_deweight_apply_mission: true
+    turn_postturn_native_velocity_deweight_apply_rtl: false
+    turn_postturn_native_velocity_deweight_apply_turning: true
+    turn_postturn_native_velocity_deweight_apply_post_turn: true
+    turn_postturn_native_velocity_deweight_min_core_gnss_diff_h_m: 0.15
+    turn_postturn_native_velocity_deweight_radial_abs_start_mps: 0.08
+    turn_postturn_native_velocity_deweight_radial_abs_full_mps: 0.28
+    turn_postturn_native_velocity_deweight_core_residual_start_h_mps: 0.08
+    turn_postturn_native_velocity_deweight_core_residual_full_h_mps: 0.30
+    turn_postturn_native_velocity_deweight_min_horizontal_speed_mps: 0.5
+    turn_postturn_native_velocity_deweight_max_abs_vertical_speed_mps: 1.0
+    turn_postturn_native_velocity_deweight_persistence_updates: 1
+    turn_postturn_native_velocity_deweight_std_min_h_mps: 0.10
+    turn_postturn_native_velocity_deweight_std_max_h_mps: 0.18
+    phase_error_memory_debug_enable: false
+    phase_error_memory_debug_residual_threshold_h_m: 0.16
+    phase_error_memory_debug_dx_over_residual_threshold: 0.22
+    phase_error_memory_debug_recent_turnpost_hold_sec: 15.0
+    adaptive_gnss_pos_weight_enable: false
+    adaptive_gnss_pos_weight_apply_mission: true
+    adaptive_gnss_pos_weight_apply_rtl: false
+    adaptive_gnss_pos_weight_trigger_source: residual_h
+    adaptive_gnss_pos_weight_floor_min_h_m: 0.08
+    adaptive_gnss_pos_weight_floor_nominal_h_m: 0.12
+    adaptive_gnss_pos_weight_floor_max_h_m: 0.16
+    adaptive_gnss_pos_weight_residual_start_h_m: 0.24
+    adaptive_gnss_pos_weight_residual_full_h_m: 0.45
+    adaptive_gnss_pos_weight_nis_start_h_2d: 5.991
+    adaptive_gnss_pos_weight_nis_full_h_2d: 20.0
+    adaptive_gnss_pos_weight_nis_max_age_sec: 2.0
+    adaptive_gnss_pos_weight_persistence_updates: 5
+    adaptive_gnss_pos_weight_attack_sec: 0.8
+    adaptive_gnss_pos_weight_decay_sec: 1.2
+    adaptive_gnss_pos_weight_armed_cruise_gain: 1.0
+    adaptive_gnss_pos_weight_turn_gain: 1.15
+    adaptive_gnss_pos_weight_post_turn_gain: 1.15
+    horizontal_consistency_supervisor_enable: false
+    horizontal_consistency_debug_csv_path: ""
+    horizontal_consistency_apply_mission: true
+    horizontal_consistency_apply_rtl: false
+    horizontal_consistency_nis_start_h_2d: 5.991
+    horizontal_consistency_nis_full_h_2d: 20.0
+    horizontal_consistency_residual_start_h_m: 0.20
+    horizontal_consistency_residual_full_h_m: 0.45
+    horizontal_consistency_core_gnss_start_h_m: 0.20
+    horizontal_consistency_core_gnss_full_h_m: 0.45
+    horizontal_consistency_heading_residual_start_deg: 0.8
+    horizontal_consistency_heading_residual_full_deg: 2.0
+    horizontal_consistency_score_trigger: 0.75
+    horizontal_consistency_persistence_updates: 3
+    horizontal_consistency_min_horizontal_speed_mps: 3.0
+    horizontal_consistency_max_vertical_speed_mps: 0.8
+    motion_gnss_pos_weight_enable: false
+    motion_gnss_pos_weight_apply_mission: true
+    motion_gnss_pos_weight_apply_rtl: false
+    motion_gnss_pos_weight_hspeed_start_mps: 3.5
+    motion_gnss_pos_weight_hspeed_full_mps: 5.0
+    motion_gnss_pos_weight_max_abs_vspeed_mps: 0.35
+    motion_gnss_pos_weight_std_min_h_m: 0.08
+    motion_gnss_pos_weight_std_max_h_m: 0.14
+    gnss_pos_recovery_weight_enable: false
+    gnss_pos_recovery_weight_apply_mission: true
+    gnss_pos_recovery_weight_apply_rtl: false
+    gnss_pos_recovery_weight_residual_start_h_m: 0.32
+    gnss_pos_recovery_weight_residual_full_h_m: 0.45
+    gnss_pos_recovery_weight_core_start_h_m: 0.30
+    gnss_pos_recovery_weight_core_full_h_m: 0.55
+    gnss_pos_recovery_weight_core_score_gain: 0.25
+    gnss_pos_recovery_weight_min_horizontal_speed_mps: 3.0
+    gnss_pos_recovery_weight_max_abs_vertical_speed_mps: 0.35
+    gnss_pos_recovery_weight_persistence_updates: 3
+    gnss_pos_recovery_weight_hold_sec: 3.0
+    gnss_pos_recovery_weight_attack_sec: 0.5
+    gnss_pos_recovery_weight_decay_sec: 2.0
+    gnss_pos_recovery_weight_std_min_h_m: 0.12
+    gnss_pos_recovery_weight_std_max_h_m: 0.16
+    context_gnss_pos_floor_enable: false
+    context_gnss_pos_floor_apply_mission: true
+    context_gnss_pos_floor_apply_rtl: false
+    context_gnss_pos_floor_mission_base_h_m: 0.08
+    context_gnss_pos_floor_turn_post_h_m: 0.10
+    context_gnss_pos_floor_armed_cruise_h_m: 0.09
+    context_gnss_pos_floor_rtl_h_m: 0.08
+    context_gnss_pos_floor_attack_sec: 0.5
+    context_gnss_pos_floor_decay_sec: 1.5
     armed_cruise_native_gnss_vel_min_horizontal_speed_mps: 0.5
     armed_cruise_native_gnss_vel_std_h_mps: 0.05
     armed_cruise_native_gnss_vel_std_u_mps: 0.10
@@ -27,6 +155,17 @@ kf_gins_node:
     armed_cruise_native_gnss_vel_residual_boost_hold_sec: 8.0
     armed_cruise_native_gnss_vel_residual_boost_std_h_mps: 0.03
     armed_cruise_native_gnss_vel_residual_boost_std_u_mps: 0.08
+    native_gnss_velocity_outlier_guard_enable: false
+    native_gnss_velocity_outlier_guard_apply_mission: true
+    native_gnss_velocity_outlier_guard_apply_rtl: false
+    native_gnss_velocity_outlier_guard_speed_mismatch_mps: 0.60
+    native_gnss_velocity_outlier_guard_core_residual_h_mps: 0.80
+    native_gnss_velocity_outlier_guard_min_horizontal_speed_mps: 1.0
+    native_gnss_velocity_outlier_guard_max_abs_vertical_speed_mps: 0.5
+    native_gnss_velocity_outlier_guard_apply_turning_context: true
+    native_gnss_velocity_outlier_guard_action: skip
+    native_gnss_velocity_outlier_guard_reweight_std_h_mps: 0.12
+    native_gnss_velocity_outlier_guard_reweight_std_u_mps: 0.20
     armed_cruise_vertical_cov_reopen_enable: true
     armed_cruise_vertical_cov_reopen_threshold_m: 0.15
     armed_cruise_vertical_cov_reopen_hold_sec: 8.0
@@ -125,6 +264,14 @@ kf_gins_node:
     heading_armed_cruise_force_relock_max_source_yaw_rate_deg_s: 2.0
     heading_armed_cruise_force_relock_yaw_std_deg: 1.0
     heading_armed_cruise_force_relock_max_rate_hz: 1.0
+    heading_cruise_micro_track_enable: false
+    heading_cruise_micro_track_std_deg: 2.0
+    heading_cruise_micro_track_min_residual_deg: 0.15
+    heading_cruise_micro_track_max_residual_deg: 1.0
+    heading_cruise_micro_track_min_horizontal_speed_mps: 4.5
+    heading_cruise_micro_track_max_vertical_speed_mps: 0.35
+    heading_cruise_micro_track_max_gyro_deg_s: 3.5
+    heading_cruise_micro_track_max_source_yaw_rate_deg_s: 1.0
     heading_underreaction_force_relock_enable: true
     heading_underreaction_force_relock_min_residual_deg: 1.40
     heading_post_turn_soft_underreaction_min_residual_deg: 1.5

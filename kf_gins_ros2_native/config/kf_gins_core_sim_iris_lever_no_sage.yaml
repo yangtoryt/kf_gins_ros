@@ -1,0 +1,98 @@
+# KF-GINS sim core config for Gazebo Classic Iris.
+# Based on kf_gins_core_sim_no_sage.yaml, but restores the Iris SITL GPS-IMU lever arm.
+
+filter_mode: 1
+
+imupath: ""
+gnsspath: ""
+outputpath: ""
+
+imudatalen: 7
+imudatarate: 200
+
+starttime: 0
+endtime: 0
+
+initpos: [ 30.5, 114, 20 ]
+initvel: [ 0.0, 0.0, 0.0 ]
+initatt: [ 0.0, 0.0, 0.0 ]
+
+initgyrbias: [ 0, 0, 0 ]
+initaccbias: [ 0, 0, 0 ]
+initgyrscale: [ 0, 0, 0 ]
+initaccscale: [ 0, 0, 0 ]
+
+initposstd: [ 0.1, 0.1, 0.2 ]
+initvelstd: [ 0.05, 0.05, 0.05 ]
+initattstd: [ 0.5, 0.5, 1.0 ]
+
+imunoise:
+  arw: [0.24, 0.24, 0.24]
+  vrw: [0.24, 0.24, 0.24]
+  gbstd: [50.0, 50.0, 50.0]
+  abstd: [250.0, 250.0, 250.0]
+  gsstd: [1000.0, 1000.0, 1000.0]
+  asstd: [1000.0, 1000.0, 1000.0]
+  corrtime: 1.0
+
+# PX4 Gazebo Classic Iris: GPS pose (0.05, 0, 0.04), IMU pose (0, 0, 0.02).
+# KF-GINS uses body forward/right/down, so the inferred GPS-IMU lever arm is +0.05 m forward, -0.02 m down.
+antlever: [ 0.05, 0.0, -0.02 ]
+
+sage_husa:
+  enable: false
+  alpha: 0.95
+  diag_only: true
+  min_var_factor: 0.1
+  min_var_abs: 0.0
+
+bounded_adaptive_r:
+  enable: false
+  mode: nis_bounded
+  apply_position: true
+  apply_velocity: true
+  alpha: 1.0
+  beta: 0.2
+  gamma_min: 1.0
+  gamma_max: 10.0
+  chi2_prob: 0.95
+
+bounded_adaptive_rq:
+  # Internal implementation path for the paper-facing
+  # Process-Context-Safeguarded Adaptive-R IESKF.
+  # Keep field names stable for existing scripts; paper-facing flat-Q
+  # configurations fix Q scaling at 1.0 and must not be reported as
+  # adaptive-Q validation.
+  enable: false
+  mode: nis_rq_selector
+  apply_position: true
+  apply_velocity: false
+  r_only_on_observation_disturbance: true
+  q_on_process_disturbance: true
+  chi2_prob: 0.95
+  nis_ratio_start: 1.0
+  nis_ratio_full: 3.0
+  consecutive_exceed_min: 3
+  hold_updates: 5
+  alpha_r: 1.0
+  alpha_r_process: 0.25
+  alpha_q: 1.0
+  beta_r: 0.2
+  beta_q: 0.1
+  gamma_r_min: 1.0
+  gamma_r_max_observation: 6.0
+  gamma_r_max_process: 1.5
+  lambda_vrw_max: 3.0
+  lambda_arw_max: 1.5
+  lambda_accbias_max: 2.0
+  lambda_gyrbias_max: 1.0
+  require_gps_quality_stable_for_q: true
+  require_process_context_for_q: true
+  process_context_score_start: 0.20
+  mixed_observation_score_start: 0.50
+  source_gate_enable: false
+  q_source_observation_score_max: 1.0
+  velocity_evidence_gate_enable: false
+  q_high_observation_velocity_nis_ratio_min: 2.0
+  q_high_observation_velocity_residual_h_min: 0.15
+  velocity_evidence_time_tolerance_sec: 0.5
